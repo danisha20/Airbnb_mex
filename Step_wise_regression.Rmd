@@ -1,0 +1,111 @@
+---
+title: "Stepwise for Quantile Regression"
+author: "RD"
+date: "March 18, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+We wanted to test a step-wise quantile regression to understand the features that impact more the model, we need to compute every quartile:
+
+```{r}
+stepfit0_10 <- step(rq(price ~ ., data = airbnb, tau = 0.1), direction = "both")
+```
+
+```{r}
+summary(stepfit0_10)
+```
+
+```{r}
+rho <- function(u,tau=.5)u*(tau - (u < 0))
+fit0_10 <- rq(price ~ 1,tau=0.1, data=airbnb)
+pseudo_r2_0_10 <- 1- stepfit0_10$rho/fit0_10$rho
+pseudo_r2_0_10
+```
+
+For quartile 0.25:
+
+```{r}
+stepfit0_25 <- step(rq(price ~ ., data = airbnb, tau = 0.25), direction = "both")
+```
+
+```{r}
+summary(stepfit0_25)
+```
+
+```{r}
+rho <- function(u,tau=.5)u*(tau - (u < 0))
+fit0_25 <- rq(price ~ 1,tau=0.25, data=airbnb)
+pseudo_r2_0_25 <- 1- stepfit0_25$rho/fit0_25$rho
+pseudo_r2_0_25
+```
+
+For quartile 0.50:
+
+```{r}
+stepfit0_50 <- step(rq(price ~ ., data = airbnb, tau = 0.5), direction = "both")
+```
+
+```{r}
+summary(stepfit0_50)
+```
+
+```{r}
+rho <- function(u,tau=.5)u*(tau - (u < 0))
+fit0_50 <- rq(price ~ 1,tau=0.5, data=airbnb)
+pseudo_r2_0_50 <- 1- stepfit0_50$rho/fit0_50$rho
+pseudo_r2_0_50
+```
+
+For quartile 0.25:
+
+```{r}
+stepfit0_75 <- step(rq(price ~ ., data = airbnb, tau = 0.75), direction = "both")
+```
+
+```{r}
+summary(stepfit0_75)
+```
+
+```{r}
+rho <- function(u,tau=.5)u*(tau - (u < 0))
+fit0_75 <- rq(price ~ 1,tau=0.75, data=airbnb)
+pseudo_r2_0_75 <- 1- stepfit0_75$rho/fit0_75$rho
+pseudo_r2_0_75
+```
+
+For quartile 0.90:
+
+```{r}
+stepfit0_90 <- step(rq(price ~ ., data = airbnb, tau = 0.9), direction = "both")
+```
+
+```{r}
+summary(stepfit0_90)
+```
+
+```{r}
+rho <- function(u,tau=.5)u*(tau - (u < 0))
+fit0_90 <- rq(price ~ 1,tau=0.9, data=airbnb)
+pseudo_r2_0_90 <- 1- stepfit0_90$rho/fit0_90$rho
+pseudo_r2_0_90
+```
+
+With step-wise procedure:
+
+Quantile 0.10 <- pseudo R^2 = 0.31
+Quantile 0.25 <- pseudo R^2 = 0.37
+Quantile 0.50 <- pseudo R^2 = 0.37
+Quantile 0.75 <- pseudo R^2 = 0.32
+Quantile 0.90 <- pseudo R^2 = 0.22
+
+The quantile regression model with step-wise selection:
+
+- Quantile 0.10: -846.24
+- Quantile 0.25: -5511.20
+- Quantile 0.50: -6571.02
+- Quantile 0.75: -2302.18
+- Quantile 0.90: 5044.44

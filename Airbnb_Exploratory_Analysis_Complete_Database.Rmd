@@ -1,0 +1,1038 @@
+---
+title: "HWA3 Exploratory Analysis"
+author: "DG,RD,IC"
+date: "February 29, 2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Initialization and Summary of the Dataset
+
+## Loading libraries and data
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggthemes)
+library(GGally)
+library(ggExtra)
+library(caret)
+library(glmnet)
+library(corrplot)
+library(leaflet)
+library(kableExtra)
+library(RColorBrewer)
+library(plotly)
+library(ggpubr)
+library(car)
+library(olsrr)
+th <- theme_fivethirtyeight() + theme(axis.title = element_text(), axis.title.x = element_text())
+set.seed(5000)
+airbnb <- read.csv("C:/Users/edudi/Google Drive/ITESM/MCC-i/2nd Semester/Data Analytics/Final Project/Mexico City AirBnB Data/listings_1.csv",encoding = "UTG-8", stringsAsFactors = F, na.strings = c("NA"))
+```
+
+Note: for R syntax convention, all empty values have been filled with "NA" in the csv file "listings".
+
+## Features of Airbnb Data
+
+Initially in listings.csv dataset we have 20,571 observations and 106 features.
+
+The following steps are follow to preprocess the data to a data exploration:
+
+1. Eliminating unused features
+
+We have features that do not carry any useful information, so we proceed to eliminate them.
+
+```{r}
+att_to_eliminate <- c("id","listing_url","scrape_id","last_scraped","name","summary","space","description","experiences_offered","neighborhood_overview","notes","transit","access","interaction","house_rules","thumbnail_url","medium_url","picture_url","xl_picture_url","host_id","host_url","host_name","host_location","host_about","host_acceptance_rate","host_thumbnail_url","host_picture_url","host_neighbourhood","host_listings_count","host_verifications","street","neighbourhood","neighbourhood_group_cleansed","city","state","zipcode","market","smart_location","country_code","country","is_location_exact","square_feet","weekly_price","monthly_price","security_deposit","cleaning_fee","maximum_maximum_nights","minimum_minimum_nights","maximum_minimum_nights","minimum_maximum_nights","minimum_nights_avg_ntm","maximum_nights_avg_ntm","calendar_updated","availability_30","availability_60","availability_90","calendar_last_scraped","number_of_reviews_ltm","first_review","review_scores_accuracy","review_scores_cleanliness","review_scores_checkin","review_scores_communication","review_scores_location","review_scores_value","requires_license","license","jurisdiction_names","require_guest_profile_picture","require_guest_phone_verification","calculated_host_listings_count_entire_homes","calculated_host_listings_count_private_rooms","calculated_host_listings_count_shared_rooms","amenities","is_business_travel_ready","has_availability", "host_total_listings_count","host_since","last_review")
+airbnb[att_to_eliminate] <- NULL
+```
+
+Features that does not hold important information for our objectives are removed ("id","listing_url","scrape_id", "last_scraped", "name","summary","space","description","transit","thumbnail_url","medium_url","picture_url","xl_picture_url","host_id","host_url","host_name","host_location","host_thumbnail_url","host_picture_url","host_neighbourhood","weekly_price","monthly_price","security_deposit","cleaning_fee","calendar_updated","availability_30","availability_60","availability_90","calendar_last_scraped","number_of_reviews_ltm","first_review","review_scores_accuracy","review_scores_cleanliness","review_scores_checkin","review_scores_communication","review_scores_location","review_scores_value","requires_license","jurisdiction_names","require_guest_profile_picture","require_guest_phone_verification","calculated_host_listings_count_entire_homes","calculated_host_listings_count_private_rooms","calculated_host_listings_count_shared_rooms")
+
+Features that contain open text information are also removed ("neighbpurhood_overview","notes","house_rules","notes","transit","access","interaction","house_rules","host_about","host_verifications","amenities")
+
+Empty features ("hot_acceptance_rate","square_feet","license") and repeated features ("host_listings_count","street","neighbourhood","neighbourhood_group_cleansed","city","state","zipcode","market","smart_location","country_code","country","maximum_maximum_nights","minimum_minimum_nights","maximum_minimum_nights","minimum_maximum_nights","minimum_nights_avg_ntm","maximum_nights_avg_ntm", "host_total_listings_count") are also removed.
+
+Features that only have one level of response such as: "experiences_offered", "is_business_travel_ready", and "has_availability"; are also removed.
+
+The features that interest us are: host_since, host_response_time, host_response_rate, host_is_superhost, host_has_profile_pic, host_identity_verified, neighbourhood_cleansed, latitude, longitude, property_type, room_type, accommodates, bathrooms, bedrooms, beds, bed_type, price, guests_included, extra_people, minimum_nights, maximum_nights,availability_365, number_of_reviews, last_review review_scores_rating, instant_bookable, cancellation_policy, calculated_host_listings_count, and reviews_per_month.
+
+2. Change from type strings to type factors features.
+
+As it is used stringsAsFactor = F function to import the csv file, we have to transform the character columns to factor columns: host_response_time, neighbourhood_cleansed, room_type, property_type, bed_type, and cacellation_policy.
+
+```{r}
+att_to_factor <- c("host_response_time","neighbourhood_cleansed", "room_type","property_type","bed_type","cancellation_policy")
+airbnb[att_to_factor] <- map(airbnb[att_to_factor], as.factor)
+```
+
+3.  Convert to date type the host_since feature.
+
+To convert to date type with the function of ymd from lubridate package.
+
+```{r warning=FALSE}
+# airbnb[c("host_since")] <- airbnb[c("host_since")] %>% map(~lubridate::ymd(.x))
+# airbnb[c("last_review")] <- airbnb[c("last_review")] %>% map(~lubridate::ymd(.x))
+```
+
+4. Changing to double and integer type from string type features.
+
+Changing type string feature "reviews_per_month", "host_response_rate", and "bathrooms" to double type. And, "bedrooms" and "beds" to be recognize as int type.
+
+```{r}
+airbnb$reviews_per_month <- type.convert(airbnb$reviews_per_month, na.strings = "NA", dec = ".", numerals = "no.loss")
+
+airbnb$host_response_rate <- type.convert(airbnb$host_response_rate, na.strings = "NA", dec = ".", numerals = "no.loss")
+
+airbnb$price <- type.convert(airbnb$price, na.strings = "NA", dec = ".", numerals = "no.loss")
+
+airbnb$bathrooms <- type.convert(airbnb$bathrooms, na.strings = "NA", dec = ".", numerals = "no.loss")
+
+airbnb$bedrooms <- type.convert(airbnb$bedrooms, na.strings = "NA")
+airbnb$beds <- type.convert(airbnb$beds, na.strings = "NA")
+```
+
+5. Convert all true and false features to boolean.
+
+The "host_is_superhost","host_has_profile_pic","host_identity_verified", and "instant_bookable" columns need to be converted to boolean.
+
+```{r}
+# Boolean types are replaced with a 0 or 1
+airbnb$host_is_superhost[airbnb$host_is_superhost == "t"] <- TRUE
+airbnb$host_is_superhost[airbnb$host_is_superhost == "f"] <- FALSE
+airbnb$host_is_superhost <- type.convert(airbnb$host_is_superhost, na.strings = "NA")
+
+airbnb$host_has_profile_pic[airbnb$host_has_profile_pic == "t"] <- TRUE
+airbnb$host_has_profile_pic[airbnb$host_has_profile_pic == "f"] <- FALSE
+airbnb$host_has_profile_pic <- type.convert(airbnb$host_has_profile_pic, na.strings = "NA")
+
+airbnb$host_identity_verified[airbnb$host_identity_verified == "t"] <- TRUE
+airbnb$host_identity_verified[airbnb$host_identity_verified == "f"] <- FALSE
+airbnb$host_identity_verified <- type.convert(airbnb$host_identity_verified, na.strings = "NA")
+
+
+airbnb$instant_bookable[airbnb$instant_bookable == "t"] <- TRUE
+airbnb$instant_bookable[airbnb$instant_bookable == "f"] <- FALSE
+airbnb$instant_bookable <- type.convert(airbnb$instant_bookable, na.strings = "NA")
+
+```
+
+
+7. Eliminate columns with more than 50% of missing values (NO COLUMNS ARE REMOVED, ALL FEATURES CONTAIN LESS THAN 50% OF MISSING VALUES)
+
+- host_response_time = 3463(16.8%)
+- host_response_rate = 3463(16.8%)
+- review_scores_rating = 4657(22.6%)
+- reviews_per_month = 4401(21.4%)
+- last_review = 4401(21.4%)
+
+The following attributes contain less than 0.1% of missing values:
+
+- host_since = 31
+- host_is_superhost = 31
+- host_total_listins_count = 31
+- host_has_profile_pic = 31
+- host_identity_verified = 31
+- bathrooms = 7
+- bedrooms = 20
+- beds = 42
+
+```{r}
+## Remove columns with more than 50% NA
+# airbnb <- airbnb[,which(colMeans(!is.na(airbnb)) > 0.5)]
+```
+
+8. Identify and eliminate outliers in price feature, which is the feature of interest.
+
+Price attribute is selected in order to understand its mean and standard deviation of all Airbnb properties in Mexico City.
+
+```{r}
+mean.result <- mean(airbnb$price)
+mean(airbnb$price)
+sprintf("This is the mean of prices: %f",mean.result)
+sd.result = sqrt(var(airbnb$price))
+sprintf("This is the standard deviation of prices: %f",sd.result)
+```
+
+As the standard deviation is high, it indicates that there are property prices that are far from the expected value. Outliners might be present because of the high standard deviation. So, for next phase we will identify and eliminate those values.
+
+```{r warning=FALSE}
+ggplot(airbnb, aes(y=price)) +
+  geom_boxplot() + 
+  scale_y_log10(labels = function(x) format(x, scientific = FALSE)) +
+  th +
+  ylab("Price") +
+  ggtitle("Price boxplot with outliers") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = mean(airbnb$price),size = 2, color = "red", linetype = 2)
+```
+
+Price has 1,441 outliers.
+
+
+```{r}
+# $out function is to get the outliers of the boxplot
+airbnb_outliers <- boxplot(airbnb$price, plot = FALSE)$out
+# To identify the rows where the outliers are located and removed them
+airbnb <- airbnb[-which(airbnb$price %in% airbnb_outliers),]
+# plot the result
+boxplot(airbnb$price, main = "Price Boxplot without outliers", ylab = "Price")
+abline(h=mean(airbnb$price), col = "Red", lty = 5, lwd = 3)
+```
+
+9. Replacing missing values with mean, mode, or median depending of the feature type and density behaviour.
+
+host_response_time = 3463(16.8%) categorical - use mode
+host_response_rate = 3463(16.8%) numerical - some extreme values so use median
+review_scores_rating = 4657(22.6%) numerical - some extreme values so use median
+reviews_per_month = 4401(21.4%) numerical - few extreme values can use mean.
+
+less than 0.1% of missing values, but still present. can use mean for numerical values and mode for categorical values.
+host_since = 31 date type - use mode
+host_is_superhost = 31  logical type use mode
+host_has_profile_pic = 31 logical type use mode
+host_identity_verified = 31 logical type use mode
+bathrooms = 7 use median
+bedrooms = 20 use median
+beds = 42 use median
+price = 8 use median
+last_review =   use mean
+
+```{r}
+# Create the function to obtain the mode
+getmode <- function(v) {
+   uniqv <- unique(v)
+   uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+airbnb$reviews_per_month[is.na(airbnb$reviews_per_month)] <- mean(airbnb$reviews_per_month, na.rm = TRUE)
+airbnb$review_scores_rating[is.na(airbnb$review_scores_rating)] <- median(airbnb$review_scores_rating, na.rm = TRUE)
+airbnb$host_response_rate[is.na(airbnb$host_response_rate)] <- median(airbnb$host_response_rate, na.rm = TRUE)
+
+airbnb$host_total_listings_count[is.na(airbnb$host_total_listings_count)] <- median(airbnb$host_total_listings_count, na.rm = TRUE)
+airbnb$bathrooms[is.na(airbnb$bathrooms)] <- median(airbnb$bathrooms, na.rm = TRUE)
+airbnb$bedrooms[is.na(airbnb$bedrooms)] <- median(airbnb$bedrooms, na.rm = TRUE)
+airbnb$beds[is.na(airbnb$beds)] <- median(airbnb$beds, na.rm = TRUE)
+
+airbnb$host_response_time <- replace_na(data = airbnb$host_response_time, replace = getmode(airbnb$host_response_time))
+# airbnb$host_since <- replace_na(data = airbnb$host_since, replace = getmode(airbnb$host_since))
+airbnb$host_is_superhost <- replace_na(data = airbnb$host_is_superhost, replace = getmode(airbnb$host_is_superhost))
+airbnb$host_has_profile_pic <- replace_na(data = airbnb$host_has_profile_pic, replace = getmode(airbnb$host_has_profile_pic))
+airbnb$host_identity_verified <- replace_na(data = airbnb$host_identity_verified, replace = getmode(airbnb$host_identity_verified))
+
+airbnb$price[is.na(airbnb$price)] <- median(airbnb$price, na.rm = TRUE)
+
+# airbnb$last_review[is.na(airbnb$last_review)] <- mean(airbnb$last_review,na.rm=TRUE)
+
+```
+
+Displaying the type of all attributes in the console to verify that these changes have applied:
+
+```{r}
+glimpse(airbnb)
+```
+
+# Data Exploration
+
+**1. Obtain mean and standard deviation**
+
+Price attribute is selected in order to understand its mean and standard deviation of all Airbnb properties in Mexico City devided by neighbourhoods.
+
+```{r}
+mean.result = mean(airbnb$price)
+sprintf("This is the mean of prices: %f",mean.result)
+sd.result = sqrt(var(airbnb$price))
+sprintf("This is the standard deviation of prices: %f",sd.result)
+library(dplyr)
+group_by(airbnb, neighbourhood_cleansed) %>%
+  summarise(
+    count = n(),
+    mean = mean(price, na.rm = TRUE),
+    sd = sd(price, na.rm = TRUE)
+  )
+```
+
+# Correlation analysis with Spearman (for numerical and binary type) and ANOVA (for factor type) analysis.
+
+First we need to verify the assumptions of the ANOVA test. http://www.sthda.com/english/wiki/one-way-anova-test-in-r
+
+Here we describe the requirement for ANOVA test. ANOVA test can be applied only when:
+
+- The observations are obtained independently and randomly from the population defined by the factor levels
+- The data of each factor level are normally distributed.
+- These normal populations have a common variance. (Levene’s test can be used to check this.) http://www.sthda.com/english/wiki/compare-multiple-sample-variances-in-r
+
+Visual methods to test normality:
+
+- Density plot: the density plot let us judge if the distribution is bell shaped.
+
+```{r}
+#Plot the density of the neighbourhoods prices
+ggplot(airbnb, aes(price)) + geom_histogram(bins = 30, aes(y = ..density..), fill ="green") + geom_density(alpha = 0.2, fill = "green") +
+  th + ggtitle("Price Distribution") +  theme(axis.title = element_text(), axis.title.x = element_text()) +
+  geom_vline(xintercept = round(mean(airbnb$price), 2), size = 2, linetype = 3) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_x_continuous(labels = function(y) format(y, scientific = FALSE))
+```
+
+- Q-Q plot (quantile-quantile plot) draws the correlation between a given sample and the normal distribution. A 45° line is plotted for reference.
+
+```{r}
+#Plot the quantile-quantile plot
+ggqqplot(airbnb$price)
+```
+
+Another way to test if the features are normally distributed is the Shapiro-Wilk test and it is implemented as follow:
+
+Hypothesis:
+
+- Null hypothesis: the data are normally distributed.
+- Alternative hypothesis: the data are not normally distributed.
+
+```{r}
+# Shapiro-Wilk normality test for prices
+shapiro.test(sample(airbnb$price,5000))
+```
+
+
+Interpretation:
+
+From the Shapiro-Wilk test, we can conclude as the p-value is less than the significance level 0.05, that the distribution of the data is significantly different from a normal distribution. Also, it can be observed that the attribute price plots are not inside of a normal distribution.
+
+**But as the central limit theorem tells us that no matter what distribution things have, the sampling distribution tends to be normal if the sample is large enough (n > 30). So we will proceed with the one-way analysis of variance.**
+
+We can transform the numbers to natural logarithm to normalize their behaviour.
+
+```{r}
+summary(airbnb$price)
+airbnb$price <- log10(airbnb$price)
+summary(airbnb$price)
+```
+
+And check again the results with the density graph:
+
+```{r}
+ggplot(airbnb, aes(price)) + geom_histogram(bins = 30, aes(y = ..density..), fill ="green") + geom_density(alpha = 0.2, fill = "green") +
+  th + theme(axis.title = element_text(), axis.title.x = element_text()) +
+  geom_vline(xintercept = round(mean(airbnb$price), 2), size = 2, linetype = 3) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_x_continuous(labels = function(y) format(y, scientific = FALSE))
+```
+
+```{r}
+ggqqplot(airbnb$price)
+
+```
+
+2. The next step is to prove the homogeneity of variances.
+
+We can prove it with the following tests:
+
+- Levene’s test: Compare the variances of k samples, where k can be more than two samples. It’s an alternative to the Bartlett’s test that is less sensitive to departures from normality.
+
+- Fligner-Killeen test: a non-parametric test which is very robust against departures from normality.
+
+The null hypothesis for both tests is that all populations variances are equal.
+The alternative hypothesis for both tests is that at least two of them differ.
+
+```{r}
+#leveneTest(price ~ neighbourhood_cleansed, data = airbnb)
+fligner.test(price ~ neighbourhood_cleansed, data = airbnb)
+```
+
+As the p value is 2.77e-14 is less than the significance level of 0.05 we can conclude that there IS evidence to suggest that the variance is statistically significantly different for the three neighbourhood levels.
+
+## Correlation matrix between features
+
+The next we want to check is parameter correlation of numerical and logical type features with Spearman correlation.
+
+If data are not normally distributed, use of the non-parametric correlation, including the rank-based Spearman correlation study, is recommended. 
+
+## Spearman Correlation Test
+
+Spearman’s rho statistic is also used to estimate a rank-based measure of association. This test may be used if the data do not come from a bi-variate normal distribution.
+
+From the Spearman's correlation:
+
+- rho is the Spearman's correlation coefficient.
+
+### Spearman Correlation Matrix
+
+We want to implement a correlation matrix on numeric data with the Spearman coefficient, to visually inspect variables that hold statistical evidence to suggest a correlation between them.
+
+```{r}
+airbnb_cor_numerical <- airbnb[, sapply(airbnb, is.numeric)]
+airbnb_cor_logical <- airbnb[, sapply(airbnb, is.logical)]
+airbnb_cor <- cbind(airbnb_cor_logical, airbnb_cor_numerical)
+correlation_matrix <- cor(airbnb_cor, use = "complete.obs", method = "spearman")
+corrplot(correlation_matrix, method = "color",type = "upper", order="hclust", tl.col = "black")
+```
+
+## ANOVA
+
+In order to understand the correlation between factor features and price, we can execute an ANOVA test:
+
+We want to test if there is any significant difference between the average price and the following features in Mexico City:
+
+- host_response_time,
+- neighbourhood_cleansed,
+- property_type, (NOT RUN, TOO MANY CATEGORIES TO CORRELATE)
+- room_type,
+- bed_type, and
+- cancellation_policy
+
+Ho: There is no difference between means
+H1: The average price is different between levels.
+
+So, we proceed to implement the one-way anova analysis with the built-in `aov`function in R.
+
+```{r}
+# Host Since Analysis
+# my_anova_data <- airbnb[,c("price","host_since")]
+# my_anova_data <- my_anova_data[order(my_anova_data$host_since),]
+# res.aov1 <- aov(price ~ host_since, data = my_anova_data)
+# summary(res.aov1)
+
+# Host Response Time
+my_anova_data <- airbnb[,c("price","host_response_time")]
+my_anova_data <- my_anova_data[order(my_anova_data$host_response_time),]
+res.aov2 <- aov(price ~ host_response_time, data = my_anova_data)
+summary(res.aov2)
+
+# Neighbourhood Analysis
+my_anova_data <- airbnb[,c("price","neighbourhood_cleansed")]
+my_anova_data <- my_anova_data[order(my_anova_data$neighbourhood_cleansed),]
+res.aov3 <- aov(price ~ neighbourhood_cleansed, data = my_anova_data)
+summary(res.aov3)
+
+# Property Type
+my_anova_data <- airbnb[,c("price","property_type")]
+my_anova_data <- my_anova_data[order(my_anova_data$property_type),]
+res.aov4 <- aov(price ~ property_type, data = my_anova_data)
+summary(res.aov4)
+
+# Room Type
+my_anova_data <- airbnb[,c("price","room_type")]
+my_anova_data <- my_anova_data[order(my_anova_data$room_type),]
+res.aov5 <- aov(price ~ room_type, data = my_anova_data)
+summary(res.aov5)
+
+
+# Bed Type
+my_anova_data <- airbnb[,c("price","bed_type")]
+my_anova_data <- my_anova_data[order(my_anova_data$bed_type),]
+res.aov6 <- aov(price ~ bed_type, data = my_anova_data)
+summary(res.aov6)
+
+# Cancellation Policy
+my_anova_data <- airbnb[,c("price","cancellation_policy")]
+my_anova_data <- my_anova_data[order(my_anova_data$cancellation_policy),]
+res.aov7 <- aov(price ~ cancellation_policy, data = my_anova_data)
+summary(res.aov7)
+
+```
+
+**Interpretation:**
+
+As the p-value is less than the significance level 0.05, we can conclude that there are significant variance differences between the groups. We reject the null hypothesis.
+
+And in order to understand which groups have a significantly statistical difference we run post hoc pair comparison with the built-in TukeyHSD function:
+
+```{r}
+# Host Since
+# TukeyHSD(res.aov1)
+# Host Response Time
+TukeyHSD(res.aov2)
+# Neighbourhood
+# TukeyHSD(res.aov3)
+# Property Type
+# TukeyHSD(res.aov4)
+# Room Type
+TukeyHSD(res.aov5)
+# Bed Type
+TukeyHSD(res.aov6)
+# Cancellation Policy
+TukeyHSD(res.aov7)
+```
+
+Interpretation:
+
+- The first observation is that there is no significant difference in prices between almost all levels of bed_type (p-value > 0.05). So, it can be group in two categories: Real Bed and Futon;as it will not hold significant statistically difference having more levels in the predictive model.
+
+- For the host_response_time feature the levels that does not hold significant statistical difference are: within a few hours-within a day
+
+- All room_type levels average means are statitical different.
+
+- For the cancellation policy, the average means that are statitically different are: moderate-flexible, strict_14_with_grace_period-flexible, and strict_14_with_grace_period-moderate. All the other pair comparissons does not hold significant difference in prices.
+
+# Data Visualization
+
+## Room Type
+
+We want to see the most common room types, for that we will explore the next bar chart:
+
+```{r}
+summary(airbnb$room_type)
+ggplot(airbnb, aes(room_type)) +
+  geom_histogram(stat ="count", fill = "blue") + 
+  th + labs(x = "Room Type", y = "Count") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ggtitle("Count of Room Types")
+```
+
+The variables of entire home or entire apartment, as the private room type are the most common properties in Mexico City.
+
+## Price
+
+### Price distribution by neighbourhood
+
+Next, we want to visualize the density of price of each neighborhood.
+
+```{r warning = FALSE}
+airbnb_nh <- airbnb %>% group_by(neighbourhood_cleansed) %>% summarise(price = round(mean(price), 2))
+airbnb_nh
+ggplot(airbnb, aes(price)) +
+  geom_histogram(bins = 30, aes(y = ..density..), fill = "purple") + 
+  geom_density(alpha = 0.2, fill = "purple") +
+  th +
+  #theme(axis.text.x=element_blank()) +
+  ggtitle("Price distribution by neighbourhood in log(10)") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_vline(data = airbnb_nh, aes(xintercept = price), size = 1, linetype = 4) +
+  geom_text(data = airbnb_nh, y=20, aes(label = paste("Mean  = ",price)), color = "darkgreen", size = 4) +
+  facet_wrap(~neighbourhood_cleansed) +
+  scale_x_log10(labels = function(y) format(y, scientific = FALSE)) 
+```
+
+From this density graph we can conclude that the highest values from price are in Miguel_Hidalgo and Cuajimalpa_de_Morelos neighborhoods. And the cheapest
+
+### Price by room type
+
+We also want to visualize the price depending the room type.
+
+```{r warning=FALSE}
+ggplot(airbnb, aes(x = room_type, y = price)) +
+  geom_boxplot(aes(fill = room_type)) + 
+  scale_y_log10(labels = function(x) format(x, scientific = FALSE)) +
+  th + 
+  xlab("Room type") + ylab("Price") +
+  ggtitle("Price by type of room") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = mean(airbnb$price), color = "red", linetype = 4)
+```
+
+From the graph we can observe that there is a lot of disspersion on prices of private room, shared room and entire hom-apt types, on the contrary, hotel room type does not hold many outliers. This is expected as these types of rooms are usually managed by people without price information and Airbnb platform allow all users to decide their room price. Private room and shared room are cheaper than the mean.
+
+### Map distribution by neighbourhood
+
+```{r}
+# pal <- colorFactor(palette = c("red", "green", "blue","gray"), domain = airbnb$neighbourhood_cleansed)
+#leaflet(data = airbnb) %>% addProviderTiles(providers$Stamen.TonerLines, options = providerTileOptions(opacity = 0.35)) %>%  addCircleMarkers(~longitude, ~latitude, color = ~pal(neighbourhood_cleansed), weight = 1, radius=1, fillOpacity = 1, opacity = 0.1, label = paste("Name:", airbnb$name)) %>% addLegend("bottomleft", pal = pal, values = ~neighbourhood_cleansed, title = "Neighbourhood", opacity = 1)
+```
+
+Most of the properties are localized at the center of Mexico City.
+
+library(leaflet)
+library(leaflet.extras)
+leaflet(airbnb) %>% addProviderTiles(providers$CartoDB.Positron) %>% addHeatmap(lng=~longitude, lat=~latitude, blur = 10, max = 0.08, radius = 8)
+
+
+############################################################################
+
+## Linear Regression Assumptions   http://r-statistics.co/Assumptions-of-Linear-Regression.html 
+
+############################################################################
+
+We want to predict the price depending different features that have a correlation with the variable we want to predict. We will assign the dependent variable as price feature and the independent variables for all other features.
+
+The model works with numeric variables the better, so we will transform factor levels as numeric:
+
+- Host Response Rate: Levels:4. within an hour (4), within a few hours (3), within a day (2), a few days or more (1)
+
+- Neighbourhood: Levels:16. Alvaro_Obregon(1), Azcapotzalco (2), , Benito_Juarez (3), Coyoacan (4), Cuajimalpa_de_Morelos(5),  Cuautemoc (6), Gustavo_A_Madero (7), Iztacalco (8), Iztapalapa (9), La_Magdalena_Contreras (10), Miguel_Hidalgo (11), MIlpa_Alta (12), Tlahuac (13), Tlalpan (14), Venustiano_Carranza(15), Xochimilco (16)
+
+- Property Type: Levels: 38. Aparthotel (1), Apartment (2), Barn (3), Bed and Breakfast (4), Boat (5), Boutique Hotel (6), Bungalow (7), Bus (8), Cabin (9), Camper/RV (10), Campsite (11), Casa particular(cuba) (12), Castle (13), Cave (14), Chalet (15), Condominium (16), Cottage (17), Cycladic House (Greece) (18), Dome house (19), Dorm (20), Earth house (21), Farm stay (22), Guest suite (23), Guesthouse (24), Hostel (25), Hotel (26), House (27), Hut (28), In-law (29), Loft (30), Nature Lodge (31), Ohter (32), Resort (33), Serviced apartment (34), tiny house (35), Townhouse (36), Treehouse (37), Villa (38).
+
+- Room type: Levels: 4. Entire home/apt. (1), hotel room (2), private room (3), shared room (4).
+
+- Bed Type: Levels: 5 Airbed(1), Couch (2), Futon (3), Pull-out sofa(4), Real Bed (5).
+
+- Cancellation Policy: Levels: 5 flexible (1), moderate (2), strict_14_with_grace_period (3), super_strict_30 (4), super_strict_60 (5).
+
+
+```{r}
+airbnb$host_response_time <- as.numeric(airbnb$host_response_time)
+airbnb$neighbourhood_cleansed <- as.numeric(airbnb$neighbourhood_cleansed)
+airbnb$property_type <- as.numeric(airbnb$property_type)
+airbnb$room_type <- as.numeric(airbnb$room_type)
+airbnb$bed_type <- as.numeric(airbnb$bed_type)
+airbnb$cancellation_policy <- as.numeric(airbnb$cancellation_policy)
+```
+
+Now, we will start with one feature to test the assumptions of linear regression. The feature that has the biggest correlation is "accommodates" and we want to test if it is possible to build a linear regression model based on this feature.
+
+```{r}
+cor(airbnb$price, airbnb$accommodates, method = "spearman")
+```
+
+The correlation index is 0.58 with spearman correlation test, indicating a high correlation and acceptable for testing.
+
+```{r message=FALSE, warning=FALSE}
+library(gvlma)
+library(lmtest)
+linear_regression_model <-lm(price ~ accommodates, data=airbnb)
+gvlma(linear_regression_model)
+```
+
+
+To build a useful linear regression model the following assumptions must comply:
+
+- Assumption 1: The regression model is linear in parameters.
+  Conclusion: TRUE, the equation is linear (y = C + ax1)
+  
+- Assumption 2: The mean of residuals is zero or very close to zero.
+  Conclusion: TRUE, the mean value of residuals is 2.7153e-17
+
+```{r}
+mean(linear_regression_model$residuals)
+```
+
+- Assumption 3: Homoscedasticity of residuals or equal variance
+  Conclusion: FALSE. The residuals vs fitted shows a pattern to follow the model(red line) and the scale-location graph show randomness in the points, with an increasing or decreasing trend. So, the condition of homoscedasticity can not be accepted.
+  
+```{r}
+par(mfrow=c(2,2))
+plot(linear_regression_model)
+```
+
+- Assumption 4: No autocorrelation of residuals
+  Conclusion: FALSE. This is applicable especially for time series data. Autocorrelation is the correlation of a time Series with lags of itself. When the residuals are autocorrelated, it means that the current value is dependent of the previous (historic) values and that there is a definite unexplained pattern in the Y variable that shows up in the disturbances. With the test of Durbin-Watson we can check if the data is random. The p-value of the test is 2.786e-15 so we have sufficient statistical data to reject the null hypothesis (the data is random), se we can conclude that there is a pattern in the residuals.
+  
+```{r}
+dwtest(linear_regression_model)
+```
+
+- Assumption 5: The X variables and residuals are uncorrelatted.
+  Conslusion: TRUE. Doing a correlation between the x variables and the residuals. The p-value is 1, so there is not a correlation between the residuals and x variables
+  
+```{r}
+cor.test(airbnb$accommodates, linear_regression_model$residuals)
+```
+
+-Assumption 6: The number of observations must be greater than number of Xs.
+  Conclusion: TRUE. There are more observations than variables.
+  
+-Assumption 7: the variability in x values is positive.
+  Conclusion: TRUE. All variances are porisitve.
+  
+```{r}
+var(airbnb$accommodates)
+```
+
+- Assumption 8: the regression model is correctly specified.
+  Conclusion. FALSE. The X and Y variable are not specified appropiately. As we do not know if the X variables have a direct or inverse relationship.
+
+
+- Assumption 9: No perfect multicollinearity.
+  Conclusion: TRUE. In this case, only price and accommodates are review. So, there is no other redundant variables that explain the same result.
+
+  We test the multicollinearity with the Variance Inflation Factor (VIF). VIF is a computed metric for each vector X that goes into a linear model. If the VIF is high, that means that the information in that variable is already explained by other X variables present in the given model, meaning that variable is more redundant. So, lower the VIF(<2) means that all variables are independent between each other.
+  
+```{r}
+# vif(linear_regression_model)
+```
+
+- Assumption 10: Normality of residuals
+  Conclusion: False. As the qq-plot shows not all the residuals are not normally distributed as they do not lie exactly on the line.
+  
+  The residuals should be normally distributed. This can be visually inspected by the qq-plot.
+  
+```{r}
+par(mfrow=c(2,2))
+plot(linear_regression_model)
+```
+
+The assumptions can be check automatically with the gvlma() function on a given linear model.
+
+```{r}
+par(mfrow=c(2,2))
+gvlma(linear_regression_model)
+```
+
+Conclusion: The assumptions were not satisfiable, so we cannot use the linear regression model for predicting price. 
+
+So we also want to test if all variables can be applied to a linear regression model:
+
+```{r}
+multiple_linear_regression_model <- lm(price ~ ., data=airbnb)
+par(mfrow=c(2,2))
+gvlma(multiple_linear_regression_model)
+```
+
+As expected the assumptions are not satisfied. Instead we will look at quantile regression, as we want to find the quantiles that could satisfy the linear predictive model.
+
+############################################################################
+
+## Quantile Regression Model
+
+############################################################################
+
+The  Quantile Regression Model (QRM) allows controlling non-linearity; non-normality due to asymmetries and outliers; and heteroskedasticity cite[Yrigoyen, C.C.; Sánchez Reyes, B. E Prezo Da Vivenda En Madrid. Rev. Galega Econ. 2012, 21, 277–296.]. QRM allows modeling different conditional quantiles of the dependent variable, thus it is possible to estimate the implicit value of each accommodation characteristic for different price ranges - or quantiles.
+
+We have regression coefficients that estimate an independet variable's effect on a specified quantile of our dependent variable. So we want to test different quantiles in our estimation.
+
+One advantage of quantile regression against ordinary least squares regression is that the quantile regression estimates are more robust against outliers.
+
+How to interpret the quality of the model:
+
+- P-value: A coefficient that has a low p-value is likely to be a meaningful addition to the model because changes in the predictor's value are related to changes in the response variable (dependent). On the contrary, a p-value bigger than 0.05 suggests that changes in the predictor are not associated with changes in the response.
+
+- Coefficient: The regression coefficients respresents the mean change in the dependent variable for one unit of change in the independent variable. 
+
+- Standard Error: The standard error is an estimate of the standard deviation of the coefficient, the amount it varies across cases. It can be thought as a measure of the precision.
+
+- T statistic: Is the coefficient divided by its standard error.
+
+Now we can generate our quantile regression model with different quantiles, we want to prove accross different percentages of data, so we will try 0.10, 0.25, 0.50, 0.75, 0.90 quantiles.
+
+```{r}
+library(quantreg)
+quantile_regression_models <- rq(price ~ ., data = airbnb, tau=c(0.1, 0.25, 0.50, 0.75, 0.90))
+# summary(quantile_regression_models, se = "iid")
+```
+
+Now we want to export the coefficients, the standard error and its corresponding p-value to a text file:
+
+```{r}
+# This text imports the summary coefficients to a text file
+# sink("C:/Users/edudi/Desktop/qr.txt")
+# print(summary(quantile_regression_models, se = "iid"))
+# sink()
+```
+
+Koenker and Manchado describe R^1, a local measure of goodness of fit at the particular quantile. Koenker gives code for V as:
+
+```{r message=FALSE, warning=FALSE}
+fit0 <- rq(price ~ 1,tau=c(0.1,0.25,0.5,0.75,0.9), data=airbnb)
+pseudo_r2 <- 1- quantile_regression_models$rho/fit0$rho
+pseudo_r2
+```
+
+We can observe that quantile 0.1 and quantile 0.90 have less than 0.5 pseudo R^2.
+
+One way to assess strength of fit is to consider how far off the model is for a typical case. That is, for some observations, the fitted value will be very close to the actual value, while for others it will not. The magnitude of a typical residual can give us a sense of generally how close our estimates are.
+
+However, recall that some of the residuals are positive, while others are negative. In fact, it is guaranteed by the least squares fitting procedure that the mean of the residuals is zero. Thus, it makes more sense to compute the square root of the mean squared residual, or root mean squared error (RMSE). R calls this quantity the residual standard error.
+
+To obtain the summary of the residuals with their repective standard error:
+
+```{r}
+# Get a summary of the residuals
+summary(residuals(quantile_regression_models))
+# Get the root mean squared error (RMSE) or also known as the Residual Standard Error (RSE) in R of Quantile 0.10
+# The degrees of freedon is: (N-2) = (19130-1) - #of explanatory X variables = 19129-27 = 19102
+sqrt(sum(quantile_regression_models$residuals[,1]^2)/19102)
+# For  quantile 0.25
+sqrt(sum(quantile_regression_models$residuals[,2]^2)/19102)
+# For quantile 0.5
+sqrt(sum(quantile_regression_models$residuals[,3]^2)/19102)
+# For quantile 0.75
+sqrt(sum(quantile_regression_models$residuals[,4]^2)/19102)
+# For quantile 0.90
+sqrt(sum(quantile_regression_models$residuals[,5]^2)/19102)
+```
+
+In the summary graph we can visualize that each black dot is the slope coefficient for the quantile indicated on the x axis, where the gray area represents the 95% confidence interval of the coefficients. The red line represents a linear regression coefficient, and the red doted line its confidence interval. The coefficient is considered statistically insignificant when the coefficient confidence interval reaches zero for a given quantile.
+
+Now we plot the features that are characteristics of the listing:
+
+```{r warning=FALSE}
+plot(summary(quantile_regression_models), parm=c(10,11,12,13,14,15,16,17,18))
+```
+
+In the Figure we can observe that the the bed type and number of bedrooms shows some stability, mainly between the 0.2 and 0.75 quatiles. Therefore. this variables are practically similar for low and high prices. The features of number of beds, property type, bathrooms, and extra people shows a positive trend, having a greater  impact on higher prices than on lower ones. Property type and beds seems o have the same behaviour with price, the bigger the price the more it affects these variables to the price. The number of people it accommodates seems to have an impact between the 0.25 and 0.5 quartiles, but the lower and higher values seems to have the same impact. The included guests shows a negative trend the bigger the cost the less the impact it is, from quartile 0.25, the variable becomes insignificant.
+
+```{r warning=FALSE}
+# plot(summary(quantile_regression_models), parm=c(19,20,21,22,23,24,25,26,27))
+```
+
+Next are the plots of the location of the property and characteristics of the host:
+
+```{r warning=FALSE}
+# plot(summary(quantile_regression_models), parm=c(2,3,4,5,6,7,8,9))
+```
+
+The impact of this study demonstrate how the property listing characteristics impact rental prices.
+
+```{r}
+AIC(quantile_regression_models)
+```
+
+# Additional for HWA6
+
+## Steps
+
+1. Construct again the quartile model with K-fold cross-validation and Lasso penalization
+
+2. Model comparisson using ANOVA.
+
+
+## 1. Construct again the quartile model with K-fold cross-validation and Lasso penalization
+
+The idea is that by shrinking or regularizing the coefficients we could expect to reduce the error. In Lasso, the penalty is the sum of the absolute values of the coefficients. Lasso reduce the coefficient estimates towards zero and it has the consecuence of setting variables exactly to zero when lambda is large enough, meaning a variable selection. The tuning parameter lambda is chosen by cross validation.
+
+The parameters that are used for the `cv.rq.pen` built-in function of library rqPen are:
+
+- Tau: Conditional quantile being modelled.
+
+- lambda: Vector of lambdas. Default is for lambdas to be automatically generated.
+
+- weights: weights for the objective function 
+
+- penalty: Type of penalty: "LASSO", "SCAD" or "MCP".
+
+- nfolds: K for K-folds cross-validation
+
+- nlambda: number of lambdas for which models are fit.
+
+- eps: smallest lambda used
+
+- init.lambda: initial lambda
+
+- criteria: How the model will be evaluated. Either cross-validation "CV", BIC "BIC" or large P BIC "PBIC".
+
+- cvFunc: If cross-validation is used how error are evaluated. Check function "check", "SqErr" (Squared Error) or "AE" (Absolute Value).
+
+- penVars: Variables that should be penalized. With default value of NULL all variables are penalized.
+
+```{r message=FALSE, warning=FALSE}
+# Load the library for the cross validation quantile regression model
+library(rqPen)
+# Specify the value of x as a matrix of predictors
+x_qrm <- data.matrix(airbnb[, names(airbnb) != "price"])
+# Specify the values of y as the vector of response values
+y_qrm <- airbnb$price
+# Build the model
+#qrm_kfoldcross_q50 <- cv.rq.pen(x = x_qrm, y = y_qrm, tau=0.50, lambda=NULL, weights=NULL, penalty="LASSO", nfolds=10, criteria="CV", cvFunc="SqErr", penVars=NULL)
+```
+
+The value of lambda was choosen after a series of experiments, the gained knowledge derived from this experiments were:
+
+- A sufficiently large lambda will force all corfficients to 0. The initial lambda was set to 0.
+
+- Bigger the nlambda parameter, the more computational resources it need.
+
+- A small step of lambda gives greater resolution of coefficients.
+
+**Interpretation of the model**
+
+When applying the `cv.rq.pen` function, it returns the following:
+
+- models: List of penalized models fit. The number of lambdas will match with the number of models.
+
+- cv: Data frame with "lambda" and second column is the evaluation based on the selected criteria. In this case we use Mean Square Error (MSE), or "SqErr".
+
+The mean squared error measures the average of the squares of the error, this means that it measures the average squared difference between the estimated vales and the actual value. The closer to 0, better the model.
+
+- lambda.min: lambda which provides the smallest statistic for the selected criteria
+
+
+```{r message=FALSE, warning=FALSE}
+#qrm_kfoldcross_q10 <- cv.rq.pen(x = x_qrm, y = y_qrm, tau=0.10, lambda=NULL, weights=NULL, penalty="LASSO", nfolds=10, criteria="CV", cvFunc="SqErr", penVars=NULL)
+#qrm_kfoldcross_q25 <- cv.rq.pen(x = x_qrm, y = y_qrm, tau=0.25, lambda=NULL, weights=NULL, penalty="LASSO", nfolds=10, criteria="CV", cvFunc="SqErr", penVars=NULL)
+#qrm_kfoldcross_q75 <- cv.rq.pen(x = x_qrm, y = y_qrm, tau=0.75, lambda=NULL, weights=NULL, penalty="LASSO", nfolds=10, criteria="CV", cvFunc="SqErr", penVars=NULL)
+#qrm_kfoldcross_q90 <- cv.rq.pen(x = x_qrm, y = y_qrm, tau=0.90, lambda=NULL, weights=NULL, penalty="LASSO", nfolds=10, criteria="CV", cvFunc="SqErr", penVars=NULL)
+```
+
+And make the assessment of the lasso regression with cross validation for each quartile. https://www.researchgate.net/post/What_is_the_AIC_formula
+
+AIC with least squares estimation with normally distributed errors. 
+
+AIC = k + n[Ln(2(pi)*RSS/(n-k))+1]
+
+k is the number of free parameters, or model parameters
+RSS is the residual sums of squares
+n is the number of observations
+
+```{r}
+# For quantile 0.10
+27 + 19130*(log(2*pi*sum(quantile_regression_models$residuals[,1]^2)/(19130-27))+1)
+# For quantile 0.25
+27 + 19130*(log(2*pi*sum(quantile_regression_models$residuals[,2]^2)/(19130-27))+1)
+# For quantile 0.50
+27 + 19130*(log(2*pi*sum(quantile_regression_models$residuals[,3]^2)/(19130-27))+1)
+# For quantile 0.75
+27 + 19130*(log(2*pi*sum(quantile_regression_models$residuals[,4]^2)/(19130-27))+1)
+# For quantile 0.90
+27 + 19130*(log(2*pi*sum(quantile_regression_models$residuals[,5]^2)/(19130-27))+1)
+
+# With 10-fold cross validation quantile regression with Lasso penalization.
+
+# AIC for quantile 0.10
+26 + 19130*(log(2*pi*sum(qrm_kfoldcross_q10$models[[1]]$residuals[,1]^2)/(19130-26))+1)
+# AIC for quantile 0.25
+27 + 19130*(log(2*pi*sum(qrm_kfoldcross_q25$models[[1]]$residuals[,1]^2)/(19130-27))+1)
+# AIC for quantile 0.50
+27 + 19130*(log(2*pi*sum(qrm_kfoldcross_q50$models[[1]]$residuals[,1]^2)/(19130-26))+1)
+# AIC for quantile 0.75
+27 + 19130*(log(2*pi*sum(qrm_kfoldcross_q75$models[[1]]$residuals[,1]^2)/(19130-26))+1)
+# AIC for quantile 0.90
+27 + 19130*(log(2*pi*sum(qrm_kfoldcross_q90$models[[1]]$residuals[,1]^2)/(19130-26))+1)
+```
+
+Pseudo R^2:
+
+```{r message=FALSE, warning=FALSE}
+# For quartile 0.10
+fit_qr10 <- rq(price ~ 1,tau=0.10, data=airbnb)
+pseudo_r2_qr10 <- 1- qrm_kfoldcross_q10$models[[1]]$rho/fit_qr10$rho
+pseudo_r2_qr10
+# For quartile 0.25
+fit_qr25 <- rq(price ~ 1,tau=0.25, data=airbnb)
+pseudo_r2_qr25 <- 1- qrm_kfoldcross_q25$models[[1]]$rho/fit_qr25$rho
+pseudo_r2_qr25
+# For quartile 0.50
+fit_qr50 <- rq(price ~ 1,tau=0.50, data=airbnb)
+pseudo_r2_qr50 <- 1- qrm_kfoldcross_q50$models[[1]]$rho/fit_qr50$rho
+pseudo_r2_qr50
+# For quartile 0.75
+fit_qr75 <- rq(price ~ 1,tau=0.75, data=airbnb)
+pseudo_r2_qr75 <- 1- qrm_kfoldcross_q75$models[[1]]$rho/fit_qr75$rho
+pseudo_r2_qr75
+# For quartile 0.90
+fit_qr90 <- rq(price ~ 1,tau=0.90, data=airbnb)
+pseudo_r2_qr90 <- 1- qrm_kfoldcross_q90$models[[1]]$rho/fit_qr90$rho
+pseudo_r2_qr90
+```
+
+Root Mean Squared Error (RMSE) or residual standard error (as known in R language):
+
+```{r}
+# For quantile 0.10
+sqrt(sum(qrm_kfoldcross_q10$models[[1]]$residuals[,1]^2)/19102)
+# For  quantile 0.25
+sqrt(sum(qrm_kfoldcross_q25$models[[1]]$residuals[,1]^2)/19102)
+# For quantile 0.5
+sqrt(sum(qrm_kfoldcross_q50$models[[1]]$residuals[,1]^2)/19102)
+# For quantile 0.75
+sqrt(sum(qrm_kfoldcross_q75$models[[1]]$residuals[,1]^2)/19102)
+# For quantile 0.90
+sqrt(sum(qrm_kfoldcross_q90$models[[1]]$residuals[,1]^2)/19102)
+```
+
+## Summary
+
+The Akaike information criterion (AIC) is an estimator of out-of-sample prediction error and thereby relative quality of statistical models for a given set of data. Given a collection of models for the data, AIC estimates the quality of each model, relative to each of the other models. Negative AIC indicates less information loss than a positive AIC and therefore a better model.
+
+R-quared (R2), represents the squared correlation between the observed outcome values and the predicted values by the model. The higher the adjusted R2, the better the model.
+
+The standard error reflects the average distance from the line of regression where the observed values fell. This indicates how incorrect the regression model is on average using the response variable values. Smaller values are better because it indicates that the observations are closer to the fitted line.
+
+The Root Mean Square Error (RMSE) is the standard deviation of the residuals (prediction errors). Residuals are a measure of how far the data points are from the regression line. Closer to 0 the RMSE value is, the better, as it indicates that all of th epoints lie on the regression line.
+
+
+## 2. Model comparisson using ANOVA.
+
+Now we want to test if the slope coefficients of our models can be considered not different. We execute an ANOVA to test this characteristic.
+
+```{r}
+# anova(quantile_regression_models)
+```
+
+From the ANOVA test we can conclude that our models slope coefficients for quantile of 0.10 to 0.90 are considered different, they do not hold paralellism between each other and are not proportional between each other.
+
+
+# New Lasso Model:
+
+```{r}
+# Load the library for the cross validation quantile regression model
+library(rqPen)
+# Specify the value of x as a matrix of predictors
+x_qrm <- data.matrix(airbnb[, names(airbnb) != "price"])
+# Specify the values of y as the vector of response values
+y_qrm <- airbnb$price
+# Build the model
+qrm_q10 <- rq(airbnb$price ~ ., data = airbnb, tau = 0.10)
+qrm_q25 <- rq(airbnb$price ~ ., data = airbnb, tau = 0.25)
+qrm_q50 <- rq(airbnb$price ~ ., data = airbnb, tau = 0.50)
+qrm_q75 <- rq(airbnb$price ~ ., data = airbnb, tau = 0.75)
+qrm_q90 <- rq(airbnb$price ~ ., data = airbnb, tau = 0.90)
+# Build the model with lasso and lambda coefficient from the k-fold predictor.
+qrm_q10_lasso <- rq(airbnb$price ~ ., data = airbnb, tau=0.10, method = "lasso", lambda=0.0001)
+qrm_q25_lasso <- rq(y_qrm ~ x_qrm, tau=0.2501, method = "lasso", lambda=0.0001)
+qrm_q50_lasso <- rq(y_qrm ~ x_qrm, tau=0.50, method = "lasso", lambda=0.0001)
+qrm_q75_lasso <- rq(y_qrm ~ x_qrm, tau=0.75, method = "lasso", lambda=0.0001)
+qrm_q90_lasso <- rq(y_qrm ~ x_qrm, tau=0.90, method = "lasso", lambda=0.0001)
+
+# Get the AIC
+AIC(qrm_q10)
+AIC(qrm_q25)
+AIC(qrm_q50)
+AIC(qrm_q75)
+AIC(qrm_q90)
+
+AIC(qrm_q10_lasso)
+AIC(qrm_q25_lasso)
+AIC(qrm_q50_lasso)
+AIC(qrm_q75_lasso)
+AIC(qrm_q90_lasso)
+
+rho <- function(u,tau=.5)u*(tau - (u < 0))
+V <- sum(rho(qrm_q10$resid, qrm_q10$tau))
+V
+# Get the pseudo R2
+fit_qr10 <- rq(price ~ 1, tau=0.10, data=airbnb)
+pseudo_r2_qr10 <- 1- qrm_q10$rho/fit_qr10$rho
+pseudo_r2_qr10
+fit_qr25 <- rq(price ~ 1, tau=0.2501, data=airbnb)
+pseudo_r2_qr25 <- 1- qrm_q25$rho/fit_qr25$rho
+pseudo_r2_qr25
+fit_qr50 <- rq(price ~ 1, tau=0.50, data=airbnb)
+pseudo_r2_qr50 <- 1- qrm_q50$rho/fit_qr50$rho
+pseudo_r2_qr50
+fit_qr75 <- rq(price ~ 1, tau=0.75, data=airbnb)
+pseudo_r2_qr75 <- 1- qrm_q75$rho/fit_qr75$rho
+pseudo_r2_qr75
+fit_qr90 <- rq(price ~ 1, tau=0.90, data=airbnb)
+pseudo_r2_qr90 <- 1- qrm_q90$rho/fit_qr90$rho
+pseudo_r2_qr90
+
+fit_qr10_lasso <- rq(y_qrm ~ 1, tau=0.10, method = "lasso",lambda=0.0001)
+pseudo_r2_qr10_lasso <- 1- qrm_q10_lasso$rho/fit_qr10$rho
+pseudo_r2_qr10_lasso
+fit_qr25_lasso <- rq(y_qrm ~ 1, tau=0.2501, method = "lasso",lambda=0.0001)
+pseudo_r2_qr25_lasso <- 1- qrm_q25_lasso$rho/fit_qr25$rho
+pseudo_r2_qr25_lasso
+fit_qr50_lasso <- rq(y_qrm ~ 1, tau=0.50, method = "lasso",lambda=0.0001)
+pseudo_r2_qr50_lasso <- 1- qrm_q50_lasso$rho/fit_qr50$rho
+pseudo_r2_qr50_lasso
+fit_qr75_lasso <- rq(y_qrm ~ 1, tau=0.75, method = "lasso",lambda=0.0001)
+pseudo_r2_qr75_lasso <- 1- qrm_q75_lasso$rho/fit_qr75$rho
+pseudo_r2_qr75_lasso
+fit_qr90_lasso <- rq(y_qrm ~ 1, tau=0.90, method = "lasso",lambda=0.0001)
+pseudo_r2_qr90_lasso <- 1- qrm_q90_lasso$rho/fit_qr90$rho
+pseudo_r2_qr90_lasso
+
+# Get the RSE
+sqrt(sum(qrm_q10$residuals^2)/19102)
+sqrt(sum(qrm_q25$residuals^2)/19102)
+sqrt(sum(qrm_q50$residuals^2)/19102)
+sqrt(sum(qrm_q75$residuals^2)/19102)
+sqrt(sum(qrm_q90$residuals^2)/19102)
+
+
+sqrt(sum(qrm_q10_lasso$residuals^2)/19106)
+sqrt(sum(qrm_q25_lasso$residuals^2)/19106)
+sqrt(sum(qrm_q50_lasso$residuals^2)/19105)
+sqrt(sum(qrm_q75_lasso$residuals^2)/19105)
+sqrt(sum(qrm_q90_lasso$residuals^2)/19104)
+```
+
+```{r}
+qrm_q90_lasso$coefficients
+```
+

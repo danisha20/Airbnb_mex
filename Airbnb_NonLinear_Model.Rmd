@@ -1,0 +1,754 @@
+---
+title: "Non-Linear Models"
+author: "RD"
+date: "March 26, 2020"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Initialization
+
+```{r message=FALSE, warning=FALSE}
+# Load all the libraries
+library(tidyverse)
+library(plyr) # To use sort and glimpse
+library(caret) # For creating data partitions
+library(mgcv) # For gam model
+library(gamsel) # For gam lasso model
+library(gvlma) # For linear test assumptions
+library(ROCR) # To compute the ROC curve
+library(rqPen) # Load the library for the cross validation quantile regression model
+library(MASS) # For creating ordinal logistic regression
+library(HandTill2001) # For ROC curve function of multcap
+library(nnet) # For the multinomial logistic regression
+library(glmnet) # Also for multinomial logistic but accepts lasso
+library(AER) # To obtain p values of ordinal
+
+library(ggthemes)
+library(GGally)
+library(ggExtra)
+library(corrplot)
+library(leaflet)
+library(kableExtra)
+library(RColorBrewer)
+library(plotly)
+library(ggpubr)
+library(car)
+library(olsrr)
+th <- theme_fivethirtyeight() + theme(axis.title = element_text(), axis.title.x = element_text())
+```
+
+```{r message=FALSE, warning=FALSE}
+airbnb <- read.csv("G:/My Drive/ITESM/MCC-i/2nd Semester/Data Analytics/Final Project/Mexico City AirBnB Data/listings_1.csv",encoding = "UTG-8", stringsAsFactors = F, na.strings = c("NA"))
+```
+
+## Data Cleaning
+
+**1. Eliminate unused features**
+
+```{r message=FALSE, warning=FALSE}
+att_to_eliminate <- c("id","listing_url","scrape_id","last_scraped","name","summary","space","description","experiences_offered","neighborhood_overview","notes","transit","access","interaction","house_rules","thumbnail_url","medium_url","picture_url","xl_picture_url","host_id","host_url","host_name","host_location","host_about","host_acceptance_rate","host_thumbnail_url","host_picture_url","host_neighbourhood","host_listings_count","host_verifications","street","neighbourhood","neighbourhood_group_cleansed","city","state","zipcode","market","smart_location","country_code","country","is_location_exact","square_feet","weekly_price","monthly_price","security_deposit","cleaning_fee","maximum_maximum_nights","minimum_minimum_nights","maximum_minimum_nights","minimum_maximum_nights","minimum_nights_avg_ntm","maximum_nights_avg_ntm","calendar_updated","availability_30","availability_60","availability_90","calendar_last_scraped","number_of_reviews_ltm","first_review","review_scores_accuracy","review_scores_cleanliness","review_scores_checkin","review_scores_communication","review_scores_location","review_scores_value","requires_license","license","jurisdiction_names","require_guest_profile_picture","require_guest_phone_verification","calculated_host_listings_count_entire_homes","calculated_host_listings_count_private_rooms","calculated_host_listings_count_shared_rooms","amenities","is_business_travel_ready","has_availability", "host_total_listings_count","host_since","last_review","property_type")
+airbnb[att_to_eliminate] <- NULL
+```
+
+**2. Change from type strings to type factors features.**
+
+```{r message=FALSE, warning=FALSE}
+att_to_factor <- c("host_response_time","neighbourhood_cleansed", "room_type","bed_type","cancellation_policy")
+airbnb[att_to_factor] <- map(airbnb[att_to_factor], as.factor)
+```
+
+**3. Changing to double and integer type from string type features.**
+
+```{r message=FALSE, warning=FALSE}
+airbnb$reviews_per_month <- type.convert(airbnb$reviews_per_month, na.strings = "NA", dec = ".", numerals = "no.loss")
+airbnb$host_response_rate <- type.convert(airbnb$host_response_rate, na.strings = "NA", dec = ".", numerals = "no.loss")
+airbnb$price <- type.convert(airbnb$price, na.strings = "NA", dec = ".", numerals = "no.loss")
+airbnb$bathrooms <- type.convert(airbnb$bathrooms, na.strings = "NA", dec = ".", numerals = "no.loss")
+airbnb$bedrooms <- type.convert(airbnb$bedrooms, na.strings = "NA")
+airbnb$beds <- type.convert(airbnb$beds, na.strings = "NA")
+```
+
+**4. Convert all true (t) and false (f) values to logical.**
+
+```{r message=FALSE, warning=FALSE}
+# Boolean types are replaced with a 0 or 1
+airbnb$host_is_superhost[airbnb$host_is_superhost == "t"] <- 1
+airbnb$host_is_superhost[airbnb$host_is_superhost == "f"] <- 0
+airbnb$host_is_superhost <- type.convert(airbnb$host_is_superhost, na.strings = "NA")
+
+airbnb$host_has_profile_pic[airbnb$host_has_profile_pic == "t"] <- 1
+airbnb$host_has_profile_pic[airbnb$host_has_profile_pic == "f"] <- 0
+airbnb$host_has_profile_pic <- type.convert(airbnb$host_has_profile_pic, na.strings = "NA")
+
+airbnb$host_identity_verified[airbnb$host_identity_verified == "t"] <- 1
+airbnb$host_identity_verified[airbnb$host_identity_verified == "f"] <- 0
+airbnb$host_identity_verified <- type.convert(airbnb$host_identity_verified, na.strings = "NA")
+
+airbnb$instant_bookable[airbnb$instant_bookable == "t"] <- 1
+airbnb$instant_bookable[airbnb$instant_bookable == "f"] <- 0
+airbnb$instant_bookable <- type.convert(airbnb$instant_bookable, na.strings = "NA")
+```
+
+**5. Identify and windsorize price feature, which is the feature of interest.**
+
+No missing values for price feature.
+
+```{r}
+sum(is.na(airbnb$price))
+```
+
+```{r}
+boxplot(airbnb$price)
+```
+
+```{r message=FALSE, warning=FALSE}
+# Winsorize instead of elimination
+# Price
+price_bench <- quantile(x = airbnb$price, prob = 0.97)
+airbnb$price[airbnb$price > price_bench] <- price_bench
+price_bench_min <- quantile(x = airbnb$price, prob = 0.03)
+airbnb$price[airbnb$price < price_bench_min] <- price_bench_min
+```
+
+```{r}
+boxplot(airbnb$price)
+```
+
+**6. Replacing missing values with mean, mode, or median depending of the feature type and density behaviour.**
+
+host_response_time = 3463(16.8%) categorical - use mode
+host_response_rate = 3463(16.8%) numerical - some extreme values so use median
+review_scores_rating = 4657(22.6%) numerical - some extreme values so use median
+reviews_per_month = 4401(21.4%) numerical - few extreme values can use mean.
+
+less than 0.1% of missing values, but still present. can use mean for numerical values and mode for categorical values.
+host_is_superhost = 31  logical type use mode
+host_has_profile_pic = 31 logical type use mode
+host_identity_verified = 31 logical type use mode
+bathrooms = 7 use median
+bedrooms = 20 use median
+beds = 42 use median
+price = 8 use median
+
+```{r message=FALSE, warning=FALSE}
+# Create the function to obtain the mode
+getmode <- function(v) {
+   uniqv <- unique(v)
+   uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+airbnb$reviews_per_month[is.na(airbnb$reviews_per_month)] <- mean(airbnb$reviews_per_month, na.rm = TRUE)
+airbnb$review_scores_rating[is.na(airbnb$review_scores_rating)] <- median(airbnb$review_scores_rating, na.rm = TRUE)
+airbnb$host_response_rate[is.na(airbnb$host_response_rate)] <- median(airbnb$host_response_rate, na.rm = TRUE)
+
+airbnb$host_total_listings_count[is.na(airbnb$host_total_listings_count)] <- median(airbnb$host_total_listings_count, na.rm = TRUE)
+airbnb$bathrooms[is.na(airbnb$bathrooms)] <- median(airbnb$bathrooms, na.rm = TRUE)
+airbnb$bedrooms[is.na(airbnb$bedrooms)] <- median(airbnb$bedrooms, na.rm = TRUE)
+airbnb$beds[is.na(airbnb$beds)] <- median(airbnb$beds, na.rm = TRUE)
+
+airbnb$host_response_time <- replace_na(data = airbnb$host_response_time, replace = getmode(airbnb$host_response_time))
+airbnb$host_is_superhost <- replace_na(data = airbnb$host_is_superhost, replace = getmode(airbnb$host_is_superhost))
+airbnb$host_has_profile_pic <- replace_na(data = airbnb$host_has_profile_pic, replace = getmode(airbnb$host_has_profile_pic))
+airbnb$host_identity_verified <- replace_na(data = airbnb$host_identity_verified, replace = getmode(airbnb$host_identity_verified))
+
+airbnb$price[is.na(airbnb$price)] <- median(airbnb$price, na.rm = TRUE)
+```
+
+```{r}
+# Heatmap
+pal <- colorFactor(palette = c("red", "green", "blue","gray"), domain = airbnb$neighbourhood_cleansed)
+leaflet(data = airbnb) %>% addProviderTiles(providers$Stamen.TonerLines, options = providerTileOptions(opacity = 0.35)) %>%  addCircleMarkers(~longitude, ~latitude, color = ~pal(neighbourhood_cleansed), weight = 1, radius=1, fillOpacity = 1, opacity = 0.1, label = paste("Name:", airbnb$name)) %>% addLegend("bottomleft", pal = pal, values = ~neighbourhood_cleansed, title = "Neighbourhood", opacity = 1)
+```
+
+```{r}
+# Shapiro-Wilk normality test for prices
+shapiro.test(sample(airbnb$price,5000))
+```
+
+```{r}
+#Plot the quantile-quantile plot
+ggqqplot(airbnb$price)
+```
+
+**7. Normalize variables.**
+
+```{r}
+ggplot(airbnb, aes(price)) + geom_histogram(bins = 30, aes(y = ..density..), fill ="green") + geom_density(alpha = 0.2, fill = "green") +
+  th + 
+  geom_vline(xintercept = round(mean(airbnb$price), 2), size = 2, linetype = 3) +
+  scale_x_continuous(labels = function(y) format(y, scientific = FALSE))
+```
+
+```{r message=FALSE, warning=FALSE}
+# Logarithmic transformation for price
+airbnb$price <- log10(airbnb$price)
+```
+
+```{r}
+ggplot(airbnb, aes(price)) + geom_histogram(bins = 30, aes(y = ..density..), fill ="green") + geom_density(alpha = 0.2, fill = "green") +
+  th + 
+  geom_vline(xintercept = round(mean(airbnb$price), 2), size = 2, linetype = 3) +
+  scale_x_continuous(labels = function(y) format(y, scientific = FALSE))
+```
+
+```{r}
+ggqqplot(airbnb$price)
+```
+
+```{r}
+#leveneTest(price ~ neighbourhood_cleansed, data = airbnb)
+fligner.test(price ~ neighbourhood_cleansed, data = airbnb)
+```
+
+```{r}
+# Neighbourhood Analysis
+my_anova_data <- airbnb[,c("price","neighbourhood_cleansed")]
+my_anova_data <- my_anova_data[order(my_anova_data$neighbourhood_cleansed),]
+res.aov3 <- aov(price ~ neighbourhood_cleansed, data = my_anova_data)
+summary(res.aov3)
+
+# Room Type
+my_anova_data <- airbnb[,c("price","room_type")]
+my_anova_data <- my_anova_data[order(my_anova_data$room_type),]
+res.aov5 <- aov(price ~ room_type, data = my_anova_data)
+summary(res.aov5)
+
+# Bed Type
+my_anova_data <- airbnb[,c("price","bed_type")]
+my_anova_data <- my_anova_data[order(my_anova_data$bed_type),]
+res.aov6 <- aov(price ~ bed_type, data = my_anova_data)
+summary(res.aov6)
+```
+
+```{r}
+# Bed Type Tukey
+TukeyHSD(res.aov6)
+```
+
+```{r}
+# Spearman Correlation Matrix
+airbnb_cor_numerical <- airbnb[, sapply(airbnb, is.numeric)]
+airbnb_cor_logical <- airbnb[, sapply(airbnb, is.logical)]
+airbnb_cor <- cbind(airbnb_cor_logical, airbnb_cor_numerical)
+correlation_matrix <- cor(airbnb_cor, use = "complete.obs", method = "spearman")
+corrplot(correlation_matrix, method = "color",type = "upper", order="hclust", tl.col = "black")
+```
+
+```{r}
+# The function to normalize data is (x - min(x))/(max(x) - min(x))
+# We take only the numerical values to normalize
+airbnb_norm <- as.data.frame(apply(airbnb[, c(2,7,8,10:13,15:22,25,26)], 2, function(x) (x - min(x))/(max(x)-min(x))))
+airbnb[,c(2,7,8,10:13,15:22,25,26)] <- airbnb_norm
+```
+
+```{r}
+ggplot(airbnb, aes(room_type)) +
+  geom_histogram(stat ="count", fill = "blue") + 
+  th + labs(x = "Room Type", y = "Count") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r warning=FALSE}
+ggplot(airbnb, aes(x = room_type, y = price)) +
+  geom_boxplot(aes(fill = room_type)) + 
+  scale_y_log10(labels = function(x) format(x, scientific = FALSE)) +
+  th + 
+  xlab("Room type") + ylab("Price") +
+  geom_hline(yintercept = mean(airbnb$price), color = "red", linetype = 4)
+```
+
+```{r warning = FALSE}
+airbnb_nh <- airbnb %>% group_by(neighbourhood_cleansed) %>% summarise(price = round(mean(price), 2))
+airbnb_nh
+ggplot(airbnb, aes(price)) +
+  geom_histogram(bins = 30, aes(y = ..density..), fill = "purple") + 
+  geom_density(alpha = 0.2, fill = "purple") +
+  th +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_vline(data = airbnb_nh, aes(xintercept = price), size = 1, linetype = 4) +
+  geom_text(data = airbnb_nh, y=20, aes(label = paste("Mean  = ",price)), color = "darkgreen", size = 4) +
+  facet_wrap(~neighbourhood_cleansed) +
+  scale_x_log10(labels = function(y) format(y, scientific = FALSE)) 
+```
+
+## Creating the models.
+
+**Generalised additive models (GAMs)**
+
+Downside: GAMs do not have an explicit form that can be nicely written down with algebra. Instead, they "smooth" over the data using kernels that determine the wiggliness the fitted model.
+
+```{r warning=FALSE, message=FALSE}
+# Create a copy of the dataframe
+airbnb_gam <- airbnb
+# Identify categorical data and replace with proposed levels
+airbnb_gam$cancellation_policy <- revalue(airbnb_gam$cancellation_policy, c("strict_14_with_grace_period"="strict","super_strict_30"="strict","super_strict_60"="strict"))
+airbnb_gam$host_response_time <- revalue(airbnb_gam$host_response_time, c("within a day"="a_day_or_more","a few days or more"="a_day_or_more"))
+airbnb_gam$neighbourhood_cleansed <- revalue(airbnb_gam$neighbourhood_cleansed, c("Cuauhtemoc"="center_sector","Coyoacan"="center_sector","Miguel_Hidalgo"="center_sector","Benito_Juarez"="center_sector", "Milpa_Alta"="south_sector","La_Magdalena_Contreras"="south_sector","Tlalpan"="south_sector","Xochimilco"="south_sector","Tlahuac"="south_sector", "Cuajimalpa_de_Morelos"="north_sector","Iztacalco"="north_sector","Azcapotzalco"="north_sector","Iztapalapa"="north_sector","Venustiano_Carranza"="north_sector","Alvaro_Obregon"="north_sector","Gustavo_A_Madero"="north_sector"))
+# Eliminate unused variable
+airbnb_gam <- airbnb_gam[, names(airbnb) != "bed_type"]
+training.samples <- airbnb$price %>% createDataPartition(p = 0.8, list = FALSE)
+train_gam <- airbnb_gam[training.samples, ]
+test_gam <- airbnb_gam[-training.samples, ]
+```
+
+```{r message=FALSE, warning=FALSE}
+# Remove property_type (Bug with too many variables)
+#gam1 <- gam(price ~ host_response_time + s(host_response_rate) + host_is_superhost + host_has_profile_pic + host_identity_verified + neighbourhood_cleansed + s(latitude) + s(accommodates) + s(longitude) + room_type + s(bathrooms) + s(bedrooms) + s(beds) + s(guests_included) + s(extra_people) + s(minimum_nights) + s(maximum_nights) + s(availability_365) + s(number_of_reviews) + s(review_scores_rating) + instant_bookable + cancellation_policy + s(calculated_host_listings_count) + s(reviews_per_month), data=train_gam, method="REML")
+#predicted_gam1 <- gam1 %>% predict(test_gam)
+#data.frame(RMSE = RMSE(predicted_gam1, test_gam$price), R2 = R2(predicted_gam1, test_gam$price), AIC = AIC(gam1))
+# gam.check(gam1)
+# Get the smoothing parameters
+#gam1$sp
+# Redo with the smoothing
+gam1 <- gam(price ~ host_response_time + s(host_response_rate, sp=2.1697) + host_is_superhost + host_has_profile_pic + host_identity_verified + neighbourhood_cleansed + s(latitude, sp=0.0072) + s(accommodates, sp=0.0006) + s(longitude, sp=0.0644) + room_type + s(bathrooms, sp=0.0010) + s(bedrooms, sp=0.0006) + s(beds, sp=0.0018) + s(guests_included, sp=0.0430) + s(extra_people, sp=0.0020) + s(minimum_nights, sp=0.0051) + s(maximum_nights, sp=0.4932) + s(availability_365, sp=0.1212) + s(number_of_reviews, sp=0.0300) + s(review_scores_rating, sp=0.0128) + instant_bookable + cancellation_policy + s(calculated_host_listings_count, sp=0.0313) + s(reviews_per_month, sp=1.5176), data=train_gam)
+predicted_gam1 <- gam1 %>% predict(test_gam)
+data.frame(RMSE = RMSE(predicted_gam1, test_gam$price), R2 = R2(predicted_gam1, test_gam$price), AIC = AIC(gam1))
+summary(gam1)
+#coeftest(gam1)
+#glimpse(gam1)
+#gam1$coefficients
+#plot(gam1)
+#gam.check(gam1)
+```
+
+**Lasso GAM**
+
+Now we will train a lasso GAM model with built-in function in R of library `gamsel` with a penalty parameter of gamma=0.4, which is the default that encourages a linear term over a nonlinear term. A lambda sequence is leave as NULL in order for the function to automatically select lambda with a response gaussian type for the linear model. We implement the cross validation function with a loss function of mean squared error (mse) to get a lambda sequence and to fit the data.
+
+https://cran.r-project.org/web/packages/gamsel/gamsel.pdf
+
+```{r}
+# Specify the value of x as a matrix of predictors
+x_gamsel <- data.matrix(train_gam[, names(train_gam) != "price"])
+# Specify the values of y as the vector of response values
+y_gamsel <- train_gam$price
+# Build the model
+#system.time(gam1_lasso <- gamsel(x_gamsel, y_gamsel, degrees=2, lambda=NULL, family="gaussian", nfolds=10, type.measure="mse"))
+# Predict
+#predicted_gam_lasso <- gam1_lasso %>% predict(test_gam)
+# Evaluate
+#data.frame(RMSE = RMSE(predicted_gam_lasso, test_gam$price), R2 = R2(predicted_gam_lasso, test_gam$price), AIC = AIC(gam1_lasso))
+```
+
+
+** Identify and windsorize price feature, which is the feature of interest.**
+
+```{r message=FALSE, warning=FALSE}
+# Winsorize instead of elimination
+
+# Accommodates
+accommodates_bench <- quantile(x = airbnb$accommodates, prob = 0.98)
+airbnb$accommodates[airbnb$accommodates > accommodates_bench] <- accommodates_bench
+# Bathrooms
+bath_bench <- quantile(x = airbnb$bathrooms, prob = 0.98, na.rm = TRUE)
+airbnb$bathrooms[airbnb$bathrooms > bath_bench] <- bath_bench
+# Bedrooms
+bedroom_bench <- quantile(x = airbnb$bedrooms, prob = 0.98, na.rm = TRUE)
+airbnb$bedrooms[airbnb$bedrooms > bedroom_bench] <- bedroom_bench
+# Beds
+bed_bench <- quantile(x = airbnb$beds, prob = 0.98, na.rm = TRUE)
+airbnb$beds[airbnb$beds > bed_bench] <- bed_bench
+# Guests_included
+guests_bench <- quantile(x = airbnb$guests_included, prob = 0.97)
+airbnb$guests_included[airbnb$guests_included > guests_bench] <- guests_bench
+# Extra_people
+extra_bench <- quantile(x = airbnb$extra_people, prob = 0.97)
+airbnb$extra_people[airbnb$extra_people > extra_bench] <- extra_bench
+# Minimum_nights
+min_bench <- quantile(x = airbnb$minimum_nights, prob = 0.95)
+airbnb$minimum_nights[airbnb$minimum_nights > min_bench] <- min_bench
+# Maximum_nights was top to 365 days as we do not hold the information of how many days
+max_bench <- 365
+airbnb$maximum_nights[airbnb$maximum_nights > max_bench] <- max_bench
+# Number_of_reviews
+reviews_bench <- quantile(x = airbnb$number_of_reviews, prob = 0.95)
+airbnb$number_of_reviews[airbnb$number_of_reviews > reviews_bench] <- reviews_bench
+# Review Scores Rating
+scores_bench <- quantile(x = airbnb$review_scores_rating, prob = 0.03, na.rm = TRUE)
+airbnb$review_scores_rating[airbnb$review_scores_rating < scores_bench] <- scores_bench
+# Calculated_host_listings_count
+count_bench <- quantile(x = airbnb$calculated_host_listings_count, prob = 0.95)
+airbnb$calculated_host_listings_count[airbnb$calculated_host_listings_count > count_bench] <- count_bench
+# Reviews_per_month
+month_bench <- quantile(x = airbnb$reviews_per_month, prob = 0.98, na.rm = TRUE)
+airbnb$reviews_per_month[airbnb$reviews_per_month > month_bench] <- month_bench
+```
+
+**Multyple Polynomial Regression Model**
+
+**Creating data partition to test and train the model.**
+
+```{r message=FALSE, warning=FALSE}
+training.samples <- airbnb$price %>% createDataPartition(p = 0.8, list = FALSE)
+train <- airbnb[training.samples, ]
+test <- airbnb[-training.samples, ]
+```
+
+```{r message=FALSE, warning=FALSE}
+# Multiple polynomial regression model with ONLY NUMERICAL.
+degree <- 4
+mprm <- lm(formula = price ~ poly(host_response_rate, degree,raw=TRUE) + poly(latitude, degree, raw = TRUE) + poly(longitude, degree, raw = TRUE) + poly(accommodates, degree, raw = TRUE) + poly(bathrooms, degree, raw = TRUE) + poly(bedrooms, degree, raw = TRUE) + poly(beds, degree, raw = TRUE) + poly(guests_included, degree, raw = TRUE) + poly(extra_people, degree,raw=TRUE) +poly(minimum_nights, degree,raw=TRUE) + poly(maximum_nights, degree,raw=TRUE) + poly(availability_365,degree,raw=TRUE) + poly(number_of_reviews,degree,raw=TRUE) + poly(review_scores_rating,degree,raw=TRUE) + poly(calculated_host_listings_count,degree,raw=TRUE) + poly(reviews_per_month,degree,raw=TRUE), data = train)
+predicted_mprm <- mprm %>% predict(test)
+data.frame(RMSE = RMSE(predicted_mprm, test$price), R2 = R2(predicted_mprm, test$price), AIC = AIC(mprm))
+```
+
+**Logistic Regression with binary predictor**
+
+1. First we create a new column with binary values. We assign a value of "TRUE" when the price of the listing is bigger than the mean of the population, and a value of "FALSE" when the price of the property is less than the mean of the population.
+
+```{r message=FALSE, warning=FALSE}
+# Create a copy of the airbnb daset without price variable
+airbnb_blog <- airbnb
+# Create a column with binary values
+airbnb_blog$logistic_price <- ifelse(airbnb_blog$price > mean(airbnb_blog$price), 1, 0)
+airbnb_blog <- airbnb_blog[, !names(airbnb) %in% c("price")] 
+```
+
+3. Create model with cross validation (https://www.r-bloggers.com/evaluating-logistic-regression-models/)
+
+When evaluating models, we often want to assess how well it performs in predicting the target variable on different subsets of the data. One such technique for doing this is k-fold cross-validation, which partitions the data into k equally sized segments (called ‘folds’). One fold is held out for validation while the other k-1 folds are used to train the model and then used to predict the target variable in our testing data. This process is repeated k times, with the performance of each model in predicting the hold-out set being tracked using a performance metric such as accuracy. The most common variation of cross validation is 10-fold cross-validation.
+
+```{r message=FALSE, warning=FALSE}
+# Define training control
+train_control <- trainControl(method = "cv", number = 10)
+training.samples <- airbnb_blog$logistic_price %>% createDataPartition(p = 0.8, list = FALSE)
+train_blog <- airbnb_blog[training.samples, ]
+test_blog <- airbnb_blog[-training.samples, ]
+# Train the model on training set
+blogm <- train(logistic_price ~ ., data = train_blog, trControl = train_control, method = "glm", family = binomial(link="logit"))
+#exp(coef(blogm$finalModel))
+summary(blogm)
+```
+
+Evaluating the model:
+
+a. Variable Importance: To assess the relative importance of individual predictors in the model, we can also look at the absolute value of the t-statistic for each model parameter. This technique is utilized by the varImp function in the caret package for general and generalized linear models.
+
+```{r message=FALSE, warning=FALSE}
+# Variable Importance
+varImp(blogm)
+# Get model Accuracy and confusion Matrix
+test_blog <- test_blog %>% 
+  mutate(prediction.logit = predict(blogm, test_blog),
+         prediction.odds = exp(prediction.logit),
+         prediction.probability = prediction.odds / (1+prediction.odds))
+test_blog <- test_blog %>% 
+  mutate(prediction = case_when(prediction.probability<= median(test_blog$prediction.probability) ~ 0,
+                                prediction.probability> median(test_blog$prediction.probability) ~ 1),
+         prediction = factor(prediction, levels = c(0,1))) # make sure no gem is the first level of our factor
+accuracy <- table(test_blog$prediction, test_blog$logistic_price)
+sum(diag(accuracy))/sum(accuracy)
+accuracy
+# Get model statistics as Rsquared, RMSE, MAE
+blogm$results
+# Get the ROC Curve computing the AUC
+pred <- prediction(test_blog$prediction.logit, test_blog$logistic_price)
+perf <- performance(pred, measure = "tpr", x.measure = "fpr")
+plot(perf)
+
+auc <- performance(pred, measure = "auc")
+auc <- auc@y.values[[1]]
+auc
+
+```
+
+The predictions are logits, i.e., logarithms of odds that the listings are more than the mean, but the observations simply tell us whether a listing price is more or not. For a meaningful comparison between predictions and observations, we need to transform the logits into a decision: listing price more than the mean or not. We can transform logits into odds by taking the exponential of the logit.
+
+We can see that with this decision rule (predict listings price more than the mean whenever the predicted probability of listing prices more than the mean is higher than 59%). https://bookdown.org/content/1340/logistic.html
+
+## Summary of models
+
+**Simple Linear Model**
+
+With the variable that has the most correlation: accommodates
+
+```{r message=FALSE, warning=FALSE}
+# Simple Linear Regression model
+simple_linear_regression_model <-lm(price ~ accommodates, data=train)
+# Predict
+predicted_simple_linear_regression_model <- simple_linear_regression_model %>% predict(test)
+# Evaluate
+data.frame(RMSE = RMSE(predicted_simple_linear_regression_model, test$price), R2 = R2(predicted_simple_linear_regression_model, test$price), AIC = AIC(simple_linear_regression_model))
+# Linear Test Assumptions
+gvlma(simple_linear_regression_model) # NOT SATISFIED
+```
+
+**Multiple Linear Regression Model**
+
+```{r message=FALSE, warning=FALSE}
+# Using the same data partitions as simple linear regression model
+# Multiple Linear Regression Model Construction
+multiple_linear_regression_model <- lm(price ~ ., data=train)
+# Predict
+predicted_multiple_linear_regression_model <- multiple_linear_regression_model %>% predict(test)
+# Evaluate
+data.frame(RMSE = RMSE(predicted_multiple_linear_regression_model, test$price), R2 = R2(predicted_multiple_linear_regression_model, test$price), AIC = AIC(multiple_linear_regression_model))
+# Linear Test Assumptions for the model
+gvlma(multiple_linear_regression_model) # NOT SATISFIED
+```
+
+```{r message=FALSE, warning=FALSE}
+# splom(airbnb[c(11,7,8,9,10)])
+summary(blogm)
+```
+
+**Qunatile Regression Model**
+
+```{r message=FALSE, warning=FALSE}
+# Specify the value of x as a matrix of predictors
+x_qrm <- data.matrix(airbnb[, names(airbnb) != "price"])
+# Specify the values of y as the vector of response values
+y_qrm <- airbnb$price
+# Build the quantile model
+qrm_q10 <- rq(train$price ~ ., data = train, tau = 0.10)
+qrm_q25 <- rq(train$price ~ ., data = train, tau = 0.25)
+qrm_q50 <- rq(train$price ~ ., data = train, tau = 0.50)
+qrm_q75 <- rq(train$price ~ ., data = train, tau = 0.75)
+qrm_q90 <- rq(train$price ~ ., data = train, tau = 0.90)
+# Predict the results with test dataset
+predicted_qrm10 <- qrm_q10 %>% predict(test)
+predicted_qrm25 <- qrm_q25 %>% predict(test)
+predicted_qrm50 <- qrm_q50 %>% predict(test)
+predicted_qrm75 <- qrm_q75 %>% predict(test)
+predicted_qrm90 <- qrm_q90 %>% predict(test)
+
+# Get the RMSE
+data.frame(RMSE10 = RMSE(predicted_qrm10, test$price), RMSE25 = RMSE(predicted_qrm25, test$price), RMSE50 = RMSE(predicted_qrm50, test$price), RMSE75 = RMSE(predicted_qrm75, test$price), RMSE90 = RMSE(predicted_qrm90, test$price))
+# Get the R2
+data.frame(R2_10 = R2(predicted_qrm10, test$price),R2_25 = R2(predicted_qrm25, test$price),R2_50 = R2(predicted_qrm50, test$price),R2_75 = R2(predicted_qrm75, test$price),R2_90 = R2(predicted_qrm90, test$price))
+
+# Get the AIC
+data.frame(AIC_Q10=AIC(qrm_q10), AIC_Q25=AIC(qrm_q25), AIC_Q50=AIC(qrm_q50), AIC_Q75=AIC(qrm_q75), AIC_Q90=AIC(qrm_q90))
+
+summary(qrm_q90, se='iid')
+```
+
+```{r}
+qrm_q10
+```
+
+```{r warning=FALSE}
+# Plotting the most representative attributes
+quantile_regression_models <- rq(price ~ ., data = train, tau=c(0.1, 0.25, 0.50, 0.75, 0.90))
+plot(summary(quantile_regression_models, se="iid"), parm=c(39,29,30,31,1))
+```
+
+**Quantile Regression Model with Lasso**
+
+Obtain the lambda value with k-fold cross validation to get the lambda values and standard errors
+
+```{r message=FALSE, warning=FALSE}
+# Specify the value of x as a matrix of predictors
+x_qrm <- data.matrix(train[, names(train) != "price"])
+# Specify the values of y as the vector of response values
+y_qrm <- train$price
+# Build the model
+#qrm_kfoldcross_q10 <- cv.rq.pen(x = x_qrm, y = y_qrm, tau=0.10, lambda=NULL, weights=NULL, penalty="LASSO", nfolds=10, criteria="CV", cvFunc="SqErr", penVars=NULL)
+#qrm_kfoldcross_q25 <- cv.rq.pen(x = x_qrm, y = y_qrm, tau=0.25, lambda=NULL, weights=NULL, penalty="LASSO", nfolds=10, criteria="CV", cvFunc="SqErr", penVars=NULL, cores=12)
+#qrm_kfoldcross_q75 <- cv.rq.pen(x = x_qrm, y = y_qrm, tau=0.75, lambda=NULL, weights=NULL, penalty="LASSO", nfolds=10, criteria="CV", cvFunc="SqErr", penVars=NULL)
+#qrm_kfoldcross_q90 <- cv.rq.pen(x = x_qrm, y = y_qrm, tau=0.90, lambda=NULL, weights=NULL, penalty="LASSO", nfolds=10, criteria="CV", cvFunc="SqErr", penVars=NULL)
+#qrm_kfoldcross_q50 <- cv.rq.pen(x = x_qrm, y = y_qrm, tau=0.50, lambda=NULL, weights=NULL, penalty="LASSO", nfolds=10, criteria="CV", cvFunc="SqErr", penVars=NULL)
+qrm_kfoldcross_q25
+```
+
+Then build the model with the selected lambda
+
+```{r message=FALSE, warning=False}
+# Build the model with lasso and lambda coefficient from the k-fold predictor.
+qrm_q10_lasso <- rq(price ~ ., data = train, tau=0.1001, method = "lasso", lambda=0.1072267222)
+qrm_q25_lasso <- rq(price ~ ., data = train, tau=0.25, method = "lasso", lambda=0.2257019720)
+qrm_q50_lasso <- rq(price ~ ., data = train, tau=0.50, method = "lasso", lambda=0.2983647240)
+qrm_q75_lasso <- rq(price ~ ., data = train, tau=0.75, method = "lasso", lambda=0.2056512308)
+qrm_q90_lasso <- rq(price ~ ., data = train, tau=0.90, method = "lasso", lambda=0.1176811952)
+# Predict the results with test dataset
+predicted_qrm10_lasso <- qrm_q10_lasso %>% predict(test)
+predicted_qrm25_lasso <- qrm_q25_lasso %>% predict(test)
+predicted_qrm50_lasso <- qrm_q50_lasso %>% predict(test)
+predicted_qrm75_lasso <- qrm_q75_lasso %>% predict(test)
+predicted_qrm90_lasso <- qrm_q90_lasso %>% predict(test)
+
+# Get the RMSE
+data.frame(RMSE10 = RMSE(predicted_qrm10_lasso, test$price), RMSE25 = RMSE(predicted_qrm25_lasso, test$price), RMSE50 = RMSE(predicted_qrm50_lasso, test$price), RMSE75 = RMSE(predicted_qrm75_lasso, test$price), RMSE90 = RMSE(predicted_qrm90_lasso, test$price))
+# Get the R2
+data.frame(R2_10 = R2(predicted_qrm10_lasso, test$price),R2_25 = R2(predicted_qrm25_lasso, test$price),R2_50 = R2(predicted_qrm50_lasso, test$price),R2_75 = R2(predicted_qrm75_lasso, test$price),R2_90 = R2(predicted_qrm90_lasso, test$price))
+
+# Get the AIC
+data.frame(AIC_Q10=AIC(qrm_q10_lasso), AIC_Q25=AIC(qrm_q25_lasso), AIC_Q50=AIC(qrm_q50_lasso), AIC_Q75=AIC(qrm_q75_lasso), AIC_Q90=AIC(qrm_q90_lasso))
+```
+
+```{r}
+
+```
+
+
+**Ordinal Logistic Regression**
+
+There are two types of logistic regression models we can apply to the dataset: Multinomial and Ordinal. Both of them are used when the dependent variable has more than two nominal categories. The only difference is the type of outcome, which can be nominal(i.e., no ordering to the categories) or ordinal (i.e., the categories have an order). In our case, we can just simple sort the prices to give order to the dataset and apply the ordinal logistic model.
+
+https://www.theanalysisfactor.com/logistic-regression-models-for-multinomial-and-ordinal-variables/
+
+First, we want the categories to be 0 or 1 creating a different column. So we create the one hot encoding dataframe from our variables with dummy variables
+
+host_response_time (4 levels): within an hour(15482), within a few hours(2470), within a day(1747), a few days or more(872)
+
+neighbourhood_cleansed (16 levels): 
+
+center_sector(16,504) = Cuauhtemoc (8140), Coyoacan(1770), Miguel_Hidalgo(3273), Benito_Juarez(3321),
+
+south_sector(1200) = Milpa_Alta(16), Tlalpan(863), Xochimilco(142), Tlahuac(37), La_Magdalena_Contreras(142)
+
+north_sector(2867) = Cuajimalpa_de_Morelos(431), Iztacalco (269),  Azcapotzalco(247), Iztapalapa(267), Venustiano_Carranza(364), Alvaro_Obregon(952), Gustavo_A_Madero(337)
+
+room_type (4 levels): Entire home/apt(10291),  Hotel room(458), Private room(9455), Shared room(367).
+
+bed_type (5 levels): Airbed(16), Couch(10), Futon Pull-out(57), Sofa(77), Real Bed(20411). Bed type does not hold sufficient evidence for non-real beds so we will remove this attribute
+
+cancellation_policy: flexible(10223), moderate(6013), strict_14_with_grace_period(4302), super_strict_30(27), super_strict_60(6).
+
+There are levels that can be grouped to reduce the number of columns after the one hot encoding. So, we will join the cancellation policy(3 levels) variable as flexible(10223), moderate(6013), strict(4335); host_response_time(3 levels) as within an hour(15482), within a few hours(2470), a_day_or_more(2619); the neighbourhood_cleansed(3 levels) variable as center_sector(16504), south_sector(1200), north_sector(2867); the room_type variable will be leaved as it is.
+
+```{r warning=FALSE, message=FALSE}
+# Create a copy of the dataframe and sort the dataset by price
+airbnb_log <- airbnb[order(airbnb$price), ]
+# Identify categorical data and replace with proposed levels
+airbnb_log$cancellation_policy <- revalue(airbnb_log$cancellation_policy, c("strict_14_with_grace_period"="strict","super_strict_30"="strict","super_strict_60"="strict"))
+airbnb_log$host_response_time <- revalue(airbnb_log$host_response_time, c("within a day"="a_day_or_more","a few days or more"="a_day_or_more"))
+airbnb_log$neighbourhood_cleansed <- revalue(airbnb_log$neighbourhood_cleansed, c("Cuauhtemoc"="center_sector","Coyoacan"="center_sector","Miguel_Hidalgo"="center_sector","Benito_Juarez"="center_sector", "Milpa_Alta"="south_sector","La_Magdalena_Contreras"="south_sector","Tlalpan"="south_sector","Xochimilco"="south_sector","Tlahuac"="south_sector", "Cuajimalpa_de_Morelos"="north_sector","Iztacalco"="north_sector","Azcapotzalco"="north_sector","Iztapalapa"="north_sector","Venustiano_Carranza"="north_sector","Alvaro_Obregon"="north_sector","Gustavo_A_Madero"="north_sector"))
+# Eliminate unused variable
+airbnb_log <- airbnb_log[, names(airbnb) != "bed_type"]
+glimpse(airbnb_log)
+```
+
+After changing the name levels and grouping them, we can proceed to implement the one hot encoding for the factor variables.
+
+```{r warning=FALSE, message=FALSE}
+dmy <- dummyVars(" ~ .", data = airbnb_log)
+airbnb_log <- data.frame(predict(dmy, newdata = airbnb_log))
+glimpse(airbnb_log)
+```
+
+Then, we divide the price variable into 3 quantiles that will predict our logistic model:
+
+1. Low (0 - 27% of the data) From \$194 to \$407 MXN. Log.
+2. Medium (28 - 50% of the data) From \$426 to \$1,259 MXN.
+4. High( 76% - 100% of the data) From \$1,278 to \$3,971 MXN.
+
+```{r warning=FALSE, message=FALSE}
+# Label the price data by the selected quantiles
+airbnb_log$ordinal_price[airbnb_log$price <= quantile(x = airbnb_log$price, prob = 0.27)] <- "1 low"
+airbnb_log$ordinal_price[airbnb_log$price > quantile(x = airbnb_log$price, prob = 0.27)] <- "2 medium"
+#airbnb_log$ordinal_price[airbnb_log$price > quantile(x = airbnb_log$price, prob = 0.51)] <- "third_quantile"
+airbnb_log$ordinal_price[airbnb_log$price > quantile(x = airbnb_log$price, prob = 0.75)] <- "3 high"
+# Transform from character to factor
+airbnb_log["ordinal_price"] <- map(airbnb_log["ordinal_price"], as.factor)
+```
+
+Now we can proceed to the creation of the model.
+
+```{r warning=FALSE, message=FALSE}
+# Divide train and test sets
+training.samples <- airbnb_log$price %>% createDataPartition(p = 0.8, list = FALSE)
+train_olog <- airbnb_log[training.samples, ]
+test_olog <- airbnb_log[-training.samples, ]
+# Eliminate price column from airbnb_log dataframe AS WELL as data that has perfect multicolinearity that impacts the model performance
+train_olog <- train_olog[, !names(train_olog) %in% c("price","host_response_time.within.an.hour","neighbourhood_cleansed.south_sector","cancellation_policy.strict","room_type.Shared.room")]
+#train_olog <- train_olog[, !names(train_olog) %in% c("price")]
+test_olog <- test_olog[, !names(test_olog) %in% c("price")]
+levels(train_olog$ordinal_price)
+```
+
+```{r}
+# Build the model
+ord_logm= polr(ordinal_price ~ ., data = train_olog, Hess = TRUE)
+summary(ord_logm)
+```
+
+The table shows the value of coefficients and intercepts with their corresponding standard errors and t values. The coefficients can be interpret as follow: holding all variables constant except if the room_type is an entire apartment, we can expect the value of ordinal price in log odds by 1.62.
+
+https://www.r-bloggers.com/how-to-perform-ordinal-logistic-regression-in-r/
+
+The intercepts are the expected odds when other variables assume a value of zero. For example, the first_quantile|fourth quantile intercept has a value of-1.6178, which indicates that the expected odds of identifying in first_quantile category, when other variables have a value of zero, is -1.6881.
+
+So, after the model is constructed, we proceed to evaluate it.
+
+```{r message=FALSE, warning=FALSE}
+# Creating model prediction class
+predict_log_price <- predict(ord_logm, newdata=test_olog)
+# Get model confusion Matrix
+table(test_olog$ordinal_price, predict_log_price)
+data.frame(Accuracy = 1 - mean(as.character(test_olog$ordinal_price) != as.character(predict_log_price)))
+# Get model statistics as Rsquared, RMSE, AIC
+nullmod <- polr(ordinal_price ~ 1, data = train_olog, Hess = TRUE)
+data.frame(R2 = 1-logLik(ord_logm)/logLik(nullmod), RMSE = sqrt(sum(ord_logm$df.residual^2)/(4113-34)), AIC = AIC(ord_logm))
+# Get the ROC Curve computing the AUC
+auc(multcap(
+  response = train_olog$ordinal_price,
+  predicted = as.matrix(predict(ord_logm, data=test_olog, type="probs"))))
+# Get the p-value
+coeftest(ord_logm)
+```
+
+**Multinomial Logistic Regression**
+
+```{r}
+# Create a copy of the dataframe
+airbnb_mlog <- airbnb
+# Identify categorical data and replace with proposed levels
+airbnb_mlog$cancellation_policy <- revalue(airbnb_mlog$cancellation_policy, c("strict_14_with_grace_period"="strict","super_strict_30"="strict","super_strict_60"="strict"))
+airbnb_mlog$host_response_time <- revalue(airbnb_mlog$host_response_time, c("within a day"="a_day_or_more","a few days or more"="a_day_or_more"))
+airbnb_mlog$neighbourhood_cleansed <- revalue(airbnb_mlog$neighbourhood_cleansed, c("Cuauhtemoc"="center_sector","Coyoacan"="center_sector","Miguel_Hidalgo"="center_sector","Benito_Juarez"="center_sector", "Milpa_Alta"="south_sector","La_Magdalena_Contreras"="south_sector","Tlalpan"="south_sector","Xochimilco"="south_sector","Tlahuac"="south_sector", "Cuajimalpa_de_Morelos"="north_sector","Iztacalco"="north_sector","Azcapotzalco"="north_sector","Iztapalapa"="north_sector","Venustiano_Carranza"="north_sector","Alvaro_Obregon"="north_sector","Gustavo_A_Madero"="north_sector"))
+# Eliminate unused variable
+airbnb_mlog <- airbnb_mlog[, names(airbnb_mlog) != "bed_type"]
+#One hot Encoding
+dmy <- dummyVars(" ~ .", data = airbnb_mlog)
+airbnb_mlog <- data.frame(predict(dmy, newdata = airbnb_mlog))
+# Label the price data by the selected quantiles
+airbnb_mlog$ordinal_price[airbnb_mlog$price <= quantile(x = airbnb_log$price, prob = 0.27)] <- "1 Low"
+airbnb_mlog$ordinal_price[airbnb_mlog$price > quantile(x = airbnb_log$price, prob = 0.27)] <- "2 Medium"
+#airbnb_mlog$ordinal_price[airbnb_mlog$price > quantile(x = airbnb_log$price, prob = 0.51)] <- "third_quantile"
+airbnb_mlog$ordinal_price[airbnb_mlog$price > quantile(x = airbnb_log$price, prob = 0.75)] <- "3 High"
+# Transform from character to factor
+airbnb_mlog["ordinal_price"] <- map(airbnb_mlog["ordinal_price"], as.factor)
+# Divide train and test sets
+training.samples <- airbnb_mlog$price %>% createDataPartition(p = 0.8, list = FALSE)
+train_mlog <- airbnb_mlog[training.samples, ]
+test_mlog <- airbnb_mlog[-training.samples, ]
+# Eliminate price column from airbnb_log dataframe AS WELL as data that has perfect multicolinearity that impacts the model performance
+#train_mlog <- train_mlog[, !names(train_mlog) %in% c("price","host_response_time.within.an.hour","neighbourhood_cleansed.south_sector","cancellation_policy.strict","room_type.Shared.room")]
+train_mlog <- train_mlog[, !names(train_mlog) %in% c("price")]
+test_mlog <- test_mlog[, !names(test_mlog) %in% c("price")]
+# Build the model
+mul_logm= multinom(ordinal_price ~ ., data = train_mlog)
+# Creating model prediction class
+predict_mlog_price <- predict(mul_logm, newdata=test_mlog)
+# Get model confusion Matrix
+table(test_mlog$ordinal_price, predict_mlog_price)
+data.frame(Accuracy = 1-mean(as.character(test_mlog$ordinal_price) != as.character(predict_mlog_price)))
+# Get model statistics as Rsquared, RMSE, AIC
+nullmod <- multinom(ordinal_price ~ 1, data = train_olog, Hess = TRUE)
+data.frame(R2 = 1-logLik(mul_logm)/logLik(nullmod), RMSE = sqrt(sum(mul_logm$residuals^2)/(4113-34)), AIC = AIC(mul_logm))
+# Get the AUC
+auc(multcap(
+  response = train_mlog$ordinal_price,
+  predicted = as.matrix(predict(mul_logm, data=test_mlog, type="probs"))))
+# get the P-values
+z_p <- summary(mul_logm)$coefficients/summary(mul_logm)$standard.errors
+p <- (1-pnorm(abs(z_p), 0, 1))*2
+summary(mul_logm)
+```
+
+```{r}
+
+# Specify the value of x as a matrix of predictors
+x_multiple <- data.matrix(train_mlog[, names(airbnb) != "ordinal_price"])
+# Specify the values of y as the vector of response values
+y_multiple <- train_mlog$ordinal_price
+# Train the model
+multiple_logistic_model <- glmnet(x_multiple, y_multiple, family="multinomial", type.multinomial ="grouped")
+```

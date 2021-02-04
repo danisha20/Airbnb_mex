@@ -1,0 +1,138 @@
+---
+title: "Airbnb_Calendar_Exploratory_Analysis"
+author: "RD"
+date: "March 1, 2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggthemes)
+library(GGally)
+library(ggExtra)
+library(caret)
+library(glmnet)
+library(corrplot)
+library(leaflet)
+library(kableExtra)
+library(RColorBrewer)
+library(plotly)
+library(ggpubr)
+library(dplyr)
+library(lubridate)
+library(tidyr)
+th <- theme_fivethirtyeight() + theme(axis.title = element_text(), axis.title.x = element_text())
+set.seed(252)
+airbnb_calendar <- read.csv("C:/Users/edudi/Google Drive/ITESM/MCC-i/2nd Semester/Data Analytics/Final Project/Mexico City AirBnB Data/calendar_holidays.csv",encoding = "UTG-8", stringsAsFactors = F, na.strings = c(""))
+```
+
+## Features of Airbnb Data
+
+```{r}
+head(airbnb_calendar) %>% kable() %>% kable_styling()
+```
+
+## Features summary
+
+```{r}
+summary(airbnb_calendar)
+```
+
+The "Date" column needs to be converted to date type with the function of ymd from lubridate package.
+
+```{r warning=FALSE}
+airbnb_calendar[c("date")] <- airbnb_calendar[c("date")] %>% map(~lubridate::ymd(.x))
+```
+
+The "Available" column needs to be converted to boolean.
+
+```{r}
+# Boolean types are replaced with a 0 or 1
+airbnb_calendar$available[airbnb_calendar$available == "t"] <- TRUE
+airbnb_calendar$available[airbnb_calendar$available == "f"] <- FALSE
+airbnb_calendar$available <- type.convert(airbnb_calendar$available)
+```
+
+Displaying the type of all attributes in the console to verify that these changes have applied:
+
+```{r}
+glimpse(airbnb_calendar)
+```
+
+Now we proceed to understand the tendency of the price against the date
+
+```{r}
+airbnb_calendar_by_month <- airbnb_calendar %>% group_by(month=floor_date(date, "month")) %>% summarize(available=mean(available)) 
+ggplot(data=airbnb_calendar_by_month, aes(x=month,y=available))+
+  geom_line() +
+  th + labs(x = "Month", y = "Availability Average") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = round(mean(airbnb_calendar_by_month$available), 2), size = 1, linetype = 4, color="red") +
+  ggtitle("Availability")
+```
+
+
+
+```{r}
+airbnb_calendar_by_day <- airbnb_calendar %>% group_by(day=floor_date(date, "day")) %>% summarize(available=mean(available))
+x1 <- seq(1:365)
+ggplot(data=airbnb_calendar_by_day, aes(x=x1,y=available))+
+  geom_line() +
+  th + labs(x = "Day of the Year", y = "Availability Average") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = round(mean(airbnb_calendar_by_day$available), 2), size = 1, linetype = 4, color="red") +
+  ggtitle("Average Availability Over Time in Mexico City")
+```
+
+
+```{r}
+airbnb_calendar_by_month_price <- airbnb_calendar %>% group_by(month=floor_date(date, "month")) %>% summarize(price=mean(price)) 
+airbnb_calendar_by_month_price
+ggplot(data=airbnb_calendar_by_month_price, aes(x=month,y=price))+
+  geom_line() +
+  th + labs(x = "Month", y = "Average Price") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = round(mean(airbnb_calendar_by_month_price$price), 2), size = 1, linetype = 4, color="red") +
+  ggtitle("Average Price per month")
+```
+
+
+
+```{r}
+airbnb_calendar_by_day_price <- airbnb_calendar %>% group_by(day=floor_date(date, "day")) %>% summarize(price=mean(price))
+x2 <- seq(1:365)
+airbnb_calendar_by_day_price
+ggplot(data=airbnb_calendar_by_day_price, aes(x=x2,y=price))+
+  geom_line() +
+  th + labs(x = "Day of the Year", y = "Price Average") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = round(mean(airbnb_calendar_by_day_price$price), 2), size = 1, linetype = 4, color="red") +
+  ggtitle("Average Price Over Time in Mexico City")
+```
+
+```{r}
+airbnb_calendar_by_holiday <- airbnb_calendar %>% group_by(holiday) %>% summarize(price=mean(price)) 
+airbnb_calendar_by_holiday
+ggplot(data=airbnb_calendar_by_holiday, aes(x=holiday,colour=holiday, y=price)) +
+  geom_point(size=5) +
+  th + labs(x = "Holiday", y = "Average Price") +
+  theme(plot.title = element_text(hjust = 0.5), axis.text.x=element_blank(), legend.title = element_blank()) +
+  geom_hline(yintercept = round(mean(airbnb_calendar_by_holiday$price), 2), size = 1, linetype = 4, color="black") +
+  scale_color_manual(labels = c("Battle of Puebla","Benito Juarez Day", "Christmas","Day of the Dead","Foundation Day","Holy Week","Independence Day","Labour Day","No Holiday","New Year","Race Day","Revolution Day","Virgin Mary's Day"), values = c("indianred2","darkorange1","orange3","yellowgreen","chartreuse3","springgreen3","turquoise4","turquoise2","dodgerblue","lightslateblue","violet","palevioletred1","hotpink")) +
+  ggtitle("Average Price per Holiday")
+```
+
+```{r}
+airbnb_calendar_by_day_week_price <- airbnb_calendar %>% group_by(day_of_week) %>% summarize(price=mean(price)) %>% mutate(day_of_week = factor(day_of_week, levels=c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday")))
+airbnb_calendar_by_day_week_price
+ggplot(data=airbnb_calendar_by_day_week_price, aes(x=day_of_week,y=price, group=1))+
+  geom_line() +
+  th + labs(x = "Day of Week", y = "Average Price") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_hline(yintercept = round(mean(airbnb_calendar_by_day_week_price$price), 2), size = 1, linetype = 4, color="red") +
+  ggtitle("Average Price by Day of Week")
+```
